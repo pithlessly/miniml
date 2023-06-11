@@ -118,6 +118,7 @@ type ('ty_id, 'ty_var) typ =
   | TCon of 'ty_id * ('ty_id, 'ty_var) typ list
 
 type ('val_id, 'ty_id, 'ty_var) expr =
+  | Tuple of ('val_id, 'ty_id, 'ty_var) expr list
   | App of ('val_id, 'ty_id, 'ty_var) expr
          * ('val_id, 'ty_id, 'ty_var) expr
   | CharLit of char
@@ -372,8 +373,8 @@ let parse_decls: token list -> (ast, string) result =
         (fun op ->
           let operator_function l r = App (App (Var op, l), r) in
           match String.get op 0 with
-          | ';' -> (0, AssocRight (fun l r -> invalid_arg "TODO: semicolon syntax"))
-          | ',' -> (1, AssocNone (fun es -> invalid_arg "TODO: tuple syntax"))
+          | ';' -> (0, AssocRight operator_function)
+          | ',' -> (1, AssocNone (fun es -> Tuple es))
           | '|' -> (2, AssocRight operator_function)
           | '&' -> (3, AssocRight operator_function)
           | '=' | '<' | '>' | '!'
