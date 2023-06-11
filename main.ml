@@ -118,9 +118,12 @@ type ('ty_id, 'ty_var) typ =
   | TCon of 'ty_id * ('ty_id, 'ty_var) typ list
 
 type ('val_id, 'ty_id, 'ty_var) expr =
+  | App of ('val_id, 'ty_id, 'ty_var) expr
+         * ('val_id, 'ty_id, 'ty_var) expr
   | CharLit of char
   | IntLit of int
   | StrLit of string
+  | Var of 'val_id
 
 type ('val_id, 'ty_id, 'ty_var) pat =
   | PVar of 'val_id
@@ -326,7 +329,7 @@ let parse_decls: token list -> (ast, string) result =
   let equal : unit parser =
     fun input k ->
     match input with | Equal :: input -> k input ()
-                     | _              -> Error "expected '='"
+                     | _ -> Error "expected '='"
   in
 
   let pattern : ast_pat option parser =
@@ -335,13 +338,76 @@ let parse_decls: token list -> (ast, string) result =
                      | _                     -> k input None
   in
 
-  let expr : ast_expr option parser =
-    fun input k ->
-    match input with | CharLit c :: input -> k input (Some (CharLit c))
-                     | IntLit i :: input  -> k input (Some (IntLit i))
-                     | StrLit s :: input  -> k input (Some (StrLit s))
-                     | _                  -> k input None
-  in
+  let rec expr0 : ast_expr option parser = fun input k ->
+    match input with
+    (* TODO: handle 'let', 'match', 'function', 'fun' *)
+    | _ -> expr1 input k
+  and expr1 = fun input k ->
+    expr2 input (fun input first_operand_opt ->
+    match first_operand_opt with
+    | None -> k input None
+    | Some first_operand ->
+      (* parse an operator and the RHS operand *)
+      let next_operand: (string * ast_expr) option parser =
+        fun input k ->
+        let continue input s = force_expr input (fun input operand ->
+                                                 k input (Some (s, operand))) in
+        match input with
+        | Comma         :: input -> continue input ","
+        | IdentSymbol s :: input -> continue input s
+        (* TODO: semicolon handling is weird, because the meaning
+           depends on the context. For example:
+             [1; let x = 2 in x; 3]
+           is parsed as
+             [1; (let x = 2 in (x; 3))] = [1; 3]
+           . It can't be properly handled as an operator.
+         *)
+        | Semicolon     :: input -> continue input ";"
+        | _                      -> k input None
+      in
+      many next_operand input (fun input (operands: (string * ast_expr) list) ->
+      let operators = List.map fst operands in
+      let operands = first_operand :: List.map snd operands in
+      let result = resolve_precedence operands operators
+        (fun op ->
+          let operator_function l r = App (App (Var op, l), r) in
+          match String.get op 0 with
+          | ';' -> (0, AssocRight (fun l r -> invalid_arg "TODO: semicolon syntax"))
+          | ',' -> (1, AssocNone (fun es -> invalid_arg "TODO: tuple syntax"))
+          | '|' -> (2, AssocRight operator_function)
+          | '&' -> (3, AssocRight operator_function)
+          | '=' | '<' | '>' | '!'
+                -> (4, AssocLeft operator_function)
+          | '@' | '^'
+                -> (5, AssocRight operator_function)
+          | ':' -> (6, AssocRight operator_function)
+          | '+' | '-'
+                -> (7, AssocLeft operator_function)
+          | '*' -> (8, AssocLeft operator_function)
+          | _   -> invalid_arg ("can't determine precedence of operator '" ^ op ^ "'"))
+      in
+      k input (Some result)))
+  and expr2 = fun input k ->
+    expr3 input (fun input head_exp_opt ->
+    match head_exp_opt with
+    | None -> k input None
+    | Some head_exp ->
+      many expr3 input (fun input arg_exps ->
+      let applications = List.fold_left (fun f x -> App (f, x)) head_exp arg_exps in
+      k input (Some applications)))
+  and expr3 = fun input k ->
+    match input with
+    | CharLit c    :: input -> k input (Some (CharLit c))
+    | IntLit i     :: input -> k input (Some (IntLit i))
+    | StrLit s     :: input -> k input (Some (StrLit s))
+    | IdentLower s :: input -> k input (Some (Var s))
+    | OpenParen    :: input ->
+      force_expr input (fun input e ->
+      match input with
+      | CloseParen :: input -> k input (Some e)
+      | _ -> Error "expected ')'")
+    | _ -> k input None
+  and force_expr input k = force "Expected expression" expr0 input k in
 
   let decls input k =
     let rec go input decls =
@@ -357,7 +423,7 @@ let parse_decls: token list -> (ast, string) result =
                force "expected function name or pattern" pattern @>
                many pattern @>
                equal @>
-               force "expected definition expression" expr @>
+               force_expr @>
           fin (fun is_rec head_pat arg_pats () rhs -> Let (is_rec, [(head_pat, arg_pats, rhs)])))
         in p' input (fun input decl -> go input (decl :: decls))
       | _ -> k input (List.rev decls)
@@ -381,4 +447,4 @@ let ast =
     lex "type ('u, 'v) s = 'a
          type t = | K of (s * s)
          type q = a -> b -> c
-         let f x y z = 1"
+         let rec f x = (1+x)"
