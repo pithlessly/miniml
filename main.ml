@@ -321,16 +321,15 @@ let parse_decls: token list -> (ast, string) result =
       k input (fun vars name -> Alias (vars, name, t)))
   in
 
-  let is_rec : bool parser =
-    fun input k ->
-    match input with | KRec :: input -> k input true
-                     | _             -> k input false
-  in
-
-  let equal : unit parser =
-    fun input k ->
-    match input with | Equal :: input -> k input ()
-                     | _ -> Error "expected '='"
+  let is_rec : bool parser
+             = fun input k -> match input with | KRec  :: input -> k input true
+                                               | _              -> k input false
+  and equal  : unit parser
+             = fun input k -> match input with | Equal :: input -> k input ()
+                                               | _              -> Error "expected '='"
+  and k_in   : unit parser
+             = fun input k -> match input with | KIn   :: input -> k input ()
+                                               | _              -> Error "expected 'in'"
   in
 
   let pattern : ast_pat option parser =
