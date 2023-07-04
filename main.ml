@@ -113,30 +113,24 @@ let lex str =
   in
   go 0 []
 
-type ('ty_id, 'ty_var) typ =
-  | TVar of 'ty_var
-  | TCon of 'ty_id * ('ty_id, 'ty_var) typ list
-
-type ('val_id, 'ty_id, 'ty_var) expr =
-  | Tuple of ('val_id, 'ty_id, 'ty_var) expr list
-  | App of ('val_id, 'ty_id, 'ty_var) expr
-         * ('val_id, 'ty_id, 'ty_var) expr
-  | CharLit of char
-  | IntLit of int
-  | StrLit of string
-  | Var of 'val_id
-
-type ('val_id, 'ty_id, 'ty_var) pat =
-  | PVar of 'val_id
-
-type ('val_id, 'ty_id, 'ty_var) decl =
-  | Datatype of 'ty_var list * 'ty_id * ('val_id * ('ty_id, 'ty_var) typ list) list
-  | Alias    of 'ty_var list * 'ty_id * ('ty_id, 'ty_var) typ
-  | Let      of bool                                (* rec? *)
-              * ( ('val_id, 'ty_id, 'ty_var) pat      (* head pattern *)
-                * ('val_id, 'ty_id, 'ty_var) pat list (* argument patterns *)
-                * ('val_id, 'ty_id, 'ty_var) expr     (* RHS *)
-                ) list                              (* joined by 'and' *)
+type (         'ty_id, 'ty_var) typ      = | TVar of 'ty_var
+                                           | TCon of 'ty_id * ('ty_id, 'ty_var) typ list
+type ('val_id, 'ty_id, 'ty_var) pat      = | PVar of 'val_id
+type ('val_id, 'ty_id, 'ty_var) bindings = | Bindings of bool                                (* rec? *)
+                                                       * ( ('val_id, 'ty_id, 'ty_var) pat      (* head pattern *)
+                                                         * ('val_id, 'ty_id, 'ty_var) pat list (* argument patterns *)
+                                                         * ('val_id, 'ty_id, 'ty_var) expr     (* RHS *)
+                                                         ) list                              (* multiple, joined by 'and' *)
+and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple   of ('val_id, 'ty_id, 'ty_var) expr list
+                                           | CharLit of char
+                                           | IntLit  of int
+                                           | StrLit  of string
+                                           | Var     of 'val_id
+                                           | App     of ('val_id, 'ty_id, 'ty_var) expr
+                                                      * ('val_id, 'ty_id, 'ty_var) expr
+type ('val_id, 'ty_id, 'ty_var) decl     = | Datatype of 'ty_var list * 'ty_id * ('val_id * ('ty_id, 'ty_var) typ list) list
+                                           | Alias    of 'ty_var list * 'ty_id * ('ty_id, 'ty_var) typ
+                                           | Let      of ('val_id, 'ty_id, 'ty_var) bindings
 
 type ast_typ = (string, string) typ
 type ast_pat = (string, string, string) pat
@@ -420,12 +414,15 @@ let parse_decls: token list -> (ast, string) result =
         in p' input (fun input decl -> go input (decl :: decls))
       | KLet :: input ->
         let p' =
-          seq (is_rec @>
+          (* TODO: 'and' *)
+          seq (is_rec       @>
                force "expected function name or pattern" pattern @>
                many pattern @>
-               equal @>
-               force_expr @>
-          fin (fun is_rec head_pat arg_pats () rhs -> Let (is_rec, [(head_pat, arg_pats, rhs)])))
+               equal        @>
+               force_expr   @>
+          fin (fun is_rec head_pat arg_pats () rhs ->
+            Let (Bindings (is_rec, [(head_pat, arg_pats, rhs)]))
+          ))
         in p' input (fun input decl -> go input (decl :: decls))
       | _ -> k input (List.rev decls)
     in go input []
