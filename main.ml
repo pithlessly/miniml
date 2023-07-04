@@ -128,6 +128,8 @@ and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple   of ('val_id, 'ty_id, 'ty_va
                                            | Var     of 'val_id
                                            | App     of ('val_id, 'ty_id, 'ty_var) expr
                                                       * ('val_id, 'ty_id, 'ty_var) expr
+                                           | LetIn   of ('val_id, 'ty_id, 'ty_var) bindings
+                                                      * ('val_id, 'ty_id, 'ty_var) expr
 type ('val_id, 'ty_id, 'ty_var) decl     = | Datatype of 'ty_var list * 'ty_id * ('val_id * ('ty_id, 'ty_var) typ list) list
                                            | Alias    of 'ty_var list * 'ty_id * ('ty_id, 'ty_var) typ
                                            | Let      of ('val_id, 'ty_id, 'ty_var) bindings
@@ -334,6 +336,21 @@ let parse_decls: token list -> (ast, string) result =
 
   let rec expr0 : ast_expr option parser = fun input k ->
     match input with
+    | KLet :: input ->
+      let p' =
+        (* TODO: 'and' *)
+        seq (is_rec       @>
+             force "expected function name or pattern" pattern @>
+             many pattern @>
+             equal        @>
+             force_expr   @>
+             k_in         @>
+             force_expr   @>
+        fin (fun is_rec head_pat arg_pats () rhs () rest ->
+          LetIn (Bindings (is_rec, [(head_pat, arg_pats, rhs)]),
+                 rest)
+        ))
+      in p' input (fun input decl -> k input (Some decl))
     (* TODO: handle 'let', 'match', 'function', 'fun' *)
     | _ -> expr1 input k
   and expr1 = fun input k ->
@@ -445,4 +462,6 @@ let ast =
     lex "type ('u, 'v) s = 'a
          type t = | K of (s * s)
          type q = a -> b -> c
-         let rec f x = (1+x)"
+         let parse =
+           let lower c = ('a' <= c && c <= 'z') || c = '_'
+         in 0"
