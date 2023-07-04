@@ -79,7 +79,16 @@ let lex str =
           | _ -> Error "invalid escape sequence in character literal")
        | Some c -> char_done c (i + 2)
        | _ -> Error "malformed character literal")
-    | Some '(' -> adv OpenParen
+    | Some '(' ->
+      (match char (i + 1) with
+       | Some '*' ->
+           let rec scan i =
+             match (char i, char (i + 1)) with
+             | (Some '*', Some ')') -> go (i + 2) tokens
+             | (Some _,   _       ) -> scan (i + 1)
+             | (None,     _       ) -> Error "got EOF while scanning comment"
+           in scan (i + 2)
+       | _        -> adv OpenParen)
     | Some ')' -> adv CloseParen
     | Some '[' -> adv OpenBracket
     | Some ']' -> adv CloseBracket
@@ -462,6 +471,7 @@ let ast =
     lex "type ('u, 'v) s = 'a
          type t = | K of (s * s)
          type q = a -> b -> c
+         (* helo *)
          let parse =
            let lower c = ('a' <= c && c <= 'z') || c = '_'
          in 0"
