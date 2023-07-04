@@ -355,6 +355,7 @@ let parse_decls: token list -> (ast, string) result =
                                                  k input (Some (s, operand))) in
         match input with
         | Comma         :: input -> continue input ","
+        | Equal         :: input -> continue input "="
         | IdentSymbol s :: input -> continue input s
         (* TODO: semicolon handling is weird, because the meaning
            depends on the context. For example:
