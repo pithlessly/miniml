@@ -9,6 +9,7 @@ type token =
   | Semicolon
   | Equal
   | Pipe
+  | Arrow
   | KType | KOf
   | KLet | KRec | KAnd | KIn
   | KIf | KThen | KElse
@@ -106,11 +107,12 @@ let lex str =
                              | _ -> IdentLower s
       in
       let mk_symbolic_ident s = match s with
-                                | "." -> Dot
-                                | ":" -> Colon
-                                | "=" -> Equal
-                                | "|" -> Pipe
-                                | _ -> IdentSymbol s
+                                | "."  -> Dot
+                                | ":"  -> Colon
+                                | "="  -> Equal
+                                | "|"  -> Pipe
+                                | "->" -> Arrow
+                                | _    -> IdentSymbol s
       in
       if upper c then take_range 0 ident (fun s -> IdentUpper s) else
       if lower c then take_range 0 ident mk_lower_ident else
@@ -146,6 +148,10 @@ and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple   of ('val_id, 'ty_id, 'ty_va
                                                       * ('val_id, 'ty_id, 'ty_var) expr
                                            | LetIn   of ('val_id, 'ty_id, 'ty_var) bindings
                                                       * ('val_id, 'ty_id, 'ty_var) expr
+                                           | Match   of ('val_id, 'ty_id, 'ty_var) expr
+                                                      * ( ('val_id, 'ty_id, 'ty_var) pat
+                                                        * ('val_id, 'ty_id, 'ty_var) expr
+                                                        ) list
 type ('val_id, 'ty_id, 'ty_var) decl     = | Datatype of 'ty_var list * 'ty_id * ('val_id * ('ty_id, 'ty_var) typ list) list
                                            | Alias    of 'ty_var list * 'ty_id * ('ty_id, 'ty_var) typ
                                            | Let      of ('val_id, 'ty_id, 'ty_var) bindings
@@ -339,9 +345,15 @@ let parse_decls: token list -> (ast, string) result =
   and equal  : unit parser
              = fun input k -> match input with | Equal :: input -> k input ()
                                                | _              -> Error "expected '='"
+  and arrow  : unit parser
+             = fun input k -> match input with | Arrow :: input -> k input ()
+                                               | _              -> Error "expected '->'"
   and k_in   : unit parser
              = fun input k -> match input with | KIn   :: input -> k input ()
                                                | _              -> Error "expected 'in'"
+  and k_with : unit parser
+             = fun input k -> match input with | KWith :: input -> k input ()
+                                               | _              -> Error "expected 'with'"
   in
 
   let rec pattern0 : ast_pat option parser = fun input k ->
@@ -395,21 +407,40 @@ let parse_decls: token list -> (ast, string) result =
              force_expr   @>
              k_in         @>
              force_expr   @>
-        fin (fun is_rec head_pat arg_pats () rhs () rest ->
+        fin (fun is_rec head_pat arg_pats () rhs () rest -> Some (
           LetIn (Bindings (is_rec, [(head_pat, arg_pats, rhs)]),
                  rest)
+        )))
+      in p' input k
+    | KMatch :: input ->
+      let branch : (ast_pat * ast_expr) option parser = fun input k ->
+        match input with
+        | Pipe :: input ->
+          let p' =
+            seq (force "expected pattern" pattern @>
+                 arrow      @>
+                 force_expr @>
+            fin (fun pat () expr -> Some (pat, expr)))
+          in p' input k
+        | _ -> k input None
+      in
+      let p' =
+        seq (force_expr  @>
+             k_with      @>
+             many branch @>
+        fin (fun scrutinee () branches -> Some (
+          Match (scrutinee, branches))
         ))
-      in p' input (fun input decl -> k input (Some decl))
-    (* TODO: handle 'let', 'match', 'function', 'fun' *)
+      in p' input k
+    (* TODO: handle 'function', 'fun' *)
     | _ -> expr1 input k
   and expr1 = fun input k ->
     expr2 input (fun input first_operand_opt ->
     match first_operand_opt with
     | None -> k input None
     | Some first_operand ->
-      (* parse an operator and the RHS operand *)
-      let next_operand: (string * ast_expr) option parser =
-        fun input k ->
+      (* parse an operator and its RHS operand *)
+      let next_operand: (string * ast_expr) option parser = fun input k ->
         let continue input s = force_expr input (fun input operand ->
                                                  k input (Some (s, operand))) in
         match input with
