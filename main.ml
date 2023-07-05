@@ -124,7 +124,14 @@ let lex str =
 
 type (         'ty_id, 'ty_var) typ      = | TVar of 'ty_var
                                            | TCon of 'ty_id * ('ty_id, 'ty_var) typ list
-type ('val_id, 'ty_id, 'ty_var) pat      = | PVar of 'val_id
+type ('val_id, 'ty_id, 'ty_var) pat      = | POr      of ('val_id, 'ty_id, 'ty_var) pat
+                                                       * ('val_id, 'ty_id, 'ty_var) pat
+                                           | PTuple   of ('val_id, 'ty_id, 'ty_var) pat list
+                                           | PCharLit of char
+                                           | PIntLit  of int
+                                           | PStrLit  of string
+                                           | PVar     of 'val_id
+                                           | PWild
 type ('val_id, 'ty_id, 'ty_var) bindings = | Bindings of bool                                (* rec? *)
                                                        * ( ('val_id, 'ty_id, 'ty_var) pat      (* head pattern *)
                                                          * ('val_id, 'ty_id, 'ty_var) pat list (* argument patterns *)
@@ -337,10 +344,43 @@ let parse_decls: token list -> (ast, string) result =
                                                | _              -> Error "expected 'in'"
   in
 
-  let pattern : ast_pat option parser =
-    fun input k ->
-    match input with | IdentLower s :: input -> k input (Some (PVar s))
-                     | _                     -> k input None
+  let rec pattern0 : ast_pat option parser = fun input k ->
+    match input with
+    | CharLit c    :: input -> k input (Some (PCharLit c))
+    | IntLit i     :: input -> k input (Some (PIntLit i))
+    | StrLit s     :: input -> k input (Some (PStrLit s))
+    | IdentLower s :: input -> k input (Some (PVar s))
+    | KUnder       :: input -> k input (Some PWild)
+    | _                     -> k input None
+  and pattern : ast_pat option parser = fun input k ->
+    pattern0 input (fun input first_operand_opt ->
+    match first_operand_opt with
+    | None -> k input None
+    | Some first_operand ->
+      (* parse a pattern operator and its RHS operand *)
+      let next_operand: (string * ast_pat) option parser = fun input k ->
+        let continue input s =
+          force "expected pattern" pattern0 input (fun input operand ->
+          k input (Some (s, operand)))
+        in
+        match input with
+        | Pipe             :: input -> continue input "|"
+        | IdentSymbol "::" :: input -> continue input "::"
+        | IdentSymbol s    :: input -> Error "invalid symbol in pattern: "
+        | _                         -> k input None
+      in
+      many next_operand input (fun input (operands: (string * ast_pat) list) ->
+      let operators = List.map fst operands in
+      let operands = first_operand :: List.map snd operands in
+      let result = resolve_precedence operands operators (fun op ->
+        match op with
+        | "|"  -> (0, AssocLeft (fun a b -> POr (a, b)))
+        | "::" -> (1, AssocRight (invalid_arg "TODO: handle cons in patterns"))
+        | _    -> invalid_arg "impossible operator")
+      in
+      k input (Some result)))
+  and patterns : ast_pat list parser = fun input k ->
+    invalid_arg "TODO"
   in
 
   let rec expr0 : ast_expr option parser = fun input k ->
