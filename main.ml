@@ -499,19 +499,14 @@ let parse_decls: token list -> (ast, string) result =
   match remaining with | [] -> Ok ds
                        | _ -> Error "unexpected tokens at EOF")
 
-let tokens =
-  let f = In_channel.open_text "main.ml" in
+let text =
+  let f = In_channel.open_text "scratchpad.mini-ml" in
   let text = In_channel.input_all f in
   In_channel.close f;
-  lex text
+  text
 
 let ast =
   let (=<<) f x = match x with | Ok a -> f a | Error e -> Error e in
   parse_decls =<<
-    lex "type ('u, 'v) s = 'a
-         type t = | K of (s * s)
-         type q = a -> b -> c
-         (* helo *)
-         let parse =
-           let lower c = ('a' <= c && c <= 'z') || c = '_'
-         in 0"
+    lex text
+
