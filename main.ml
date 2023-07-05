@@ -140,6 +140,8 @@ type ('val_id, 'ty_id, 'ty_var) bindings = | Bindings of bool                   
                                                          * ('val_id, 'ty_id, 'ty_var) expr     (* RHS *)
                                                          ) list                              (* multiple, joined by 'and' *)
 and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple   of ('val_id, 'ty_id, 'ty_var) expr list
+                                           | Con     of 'val_id
+                                                      * ('val_id, 'ty_id, 'ty_var) expr list option
                                            | CharLit of char
                                            | IntLit  of int
                                            | StrLit  of string
@@ -482,13 +484,31 @@ let parse_decls: token list -> (ast, string) result =
       in
       k input (Some result)))
   and expr2 = fun input k ->
-    expr3 input (fun input head_exp_opt ->
-    match head_exp_opt with
-    | None -> k input None
-    | Some head_exp ->
-      many expr3 input (fun input arg_exps ->
-      let applications = List.fold_left (fun f x -> App (f, x)) head_exp arg_exps in
-      k input (Some applications)))
+    match input with
+    | IdentUpper constructor :: input ->
+      expr3 input (fun input constructor_args_opt -> k input (
+        (* NOTE: The reader might be wondering: "isn't it hacky to detect
+           multi-argument constructors by just matching on whether the
+           argument is a tuple literal literal? After all, this would mean
+           we would incorrectly parse something like `A ((1, 2))` as a
+           two-argument constructor since parens are transparent to the
+           AST."
+
+           Well, as it turns out, the real OCaml parser does the same hack ;)
+           *)
+        match constructor_args_opt with
+        | None              -> Some (Con (constructor, None))
+        | Some (Tuple args) -> Some (Con (constructor, Some args))
+        | Some e            -> Some (Con (constructor, Some [e]))
+      ))
+    | _ ->
+      expr3 input (fun input head_exp_opt ->
+      match head_exp_opt with
+      | None -> k input None
+      | Some head_exp ->
+        many expr3 input (fun input arg_exps ->
+        let applications = List.fold_left (fun f x -> App (f, x)) head_exp arg_exps in
+        k input (Some applications)))
   and expr3 = fun input k ->
     match input with
     | CharLit c    :: input -> k input (Some (CharLit c))
