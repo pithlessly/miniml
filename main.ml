@@ -441,8 +441,10 @@ let parse_decls: token list -> (ast, string) result =
     | Some first_operand ->
       (* parse an operator and its RHS operand *)
       let next_operand: (string * ast_expr) option parser = fun input k ->
-        let continue input s = force_expr input (fun input operand ->
-                                                 k input (Some (s, operand))) in
+        let continue input s =
+          force "expected expression" expr2 input (fun input operand ->
+          k input (Some (s, operand)))
+        in
         match input with
         | Comma         :: input -> continue input ","
         | Equal         :: input -> continue input "="
