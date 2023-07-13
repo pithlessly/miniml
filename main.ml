@@ -508,8 +508,12 @@ let parse_decls: token list -> (ast, string) result =
       in
       k input (Some result)))
   and expr2 = fun input k ->
-    match input with
-    | IdentUpper constructor :: input ->
+    match (input, (match input with
+                   | IdentUpper _ :: Dot :: _ -> false
+                   | IdentUpper _        :: _ -> true
+                   |                        _ -> false))
+    with
+    | (IdentUpper constructor :: input, true) ->
       expr3 input (fun input constructor_args_opt -> k input (
         (* NOTE: The reader might be wondering: "isn't it hacky to detect
            multi-argument constructors by just matching on whether the
