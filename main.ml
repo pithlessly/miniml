@@ -139,21 +139,24 @@ type ('val_id, 'ty_id, 'ty_var) bindings = | Bindings of bool                   
                                                          * ('val_id, 'ty_id, 'ty_var) pat list (* argument patterns *)
                                                          * ('val_id, 'ty_id, 'ty_var) expr     (* RHS *)
                                                          ) list                              (* multiple, joined by 'and' *)
-and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple   of ('val_id, 'ty_id, 'ty_var) expr list
-                                           | Con     of 'val_id
-                                                      * ('val_id, 'ty_id, 'ty_var) expr list option
-                                           | CharLit of char
-                                           | IntLit  of int
-                                           | StrLit  of string
-                                           | Var     of 'val_id
-                                           | App     of ('val_id, 'ty_id, 'ty_var) expr
-                                                      * ('val_id, 'ty_id, 'ty_var) expr
-                                           | LetIn   of ('val_id, 'ty_id, 'ty_var) bindings
-                                                      * ('val_id, 'ty_id, 'ty_var) expr
-                                           | Match   of ('val_id, 'ty_id, 'ty_var) expr
-                                                      * ( ('val_id, 'ty_id, 'ty_var) pat
-                                                        * ('val_id, 'ty_id, 'ty_var) expr
-                                                        ) list
+and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple      of ('val_id, 'ty_id, 'ty_var) expr list
+                                           | Con        of 'val_id
+                                                         * ('val_id, 'ty_id, 'ty_var) expr list option
+                                           | CharLit    of char
+                                           | IntLit     of int
+                                           | StrLit     of string
+                                           | Var        of 'val_id
+                                           | App        of ('val_id, 'ty_id, 'ty_var) expr
+                                                         * ('val_id, 'ty_id, 'ty_var) expr
+                                           | LetIn      of ('val_id, 'ty_id, 'ty_var) bindings
+                                                         * ('val_id, 'ty_id, 'ty_var) expr
+                                           | Match      of ('val_id, 'ty_id, 'ty_var) expr
+                                                         * ( ('val_id, 'ty_id, 'ty_var) pat
+                                                           * ('val_id, 'ty_id, 'ty_var) expr
+                                                           ) list
+                                           | IfThenElse of ('val_id, 'ty_id, 'ty_var) expr
+                                                         * ('val_id, 'ty_id, 'ty_var) expr
+                                                         * ('val_id, 'ty_id, 'ty_var) expr
 type ('val_id, 'ty_id, 'ty_var) decl     = | Datatype of 'ty_var list * 'ty_id * ('val_id * ('ty_id, 'ty_var) typ list) list
                                            | Alias    of 'ty_var list * 'ty_id * ('ty_id, 'ty_var) typ
                                            | Let      of ('val_id, 'ty_id, 'ty_var) bindings
@@ -353,6 +356,12 @@ let parse_decls: token list -> (ast, string) result =
   and k_in   : unit parser
              = fun input k -> match input with | KIn   :: input -> k input ()
                                                | _              -> Error "expected 'in'"
+  and k_then : unit parser
+             = fun input k -> match input with | KThen :: input -> k input ()
+                                               | _              -> Error "expected 'then'"
+  and k_else : unit parser
+             = fun input k -> match input with | KElse :: input -> k input ()
+                                               | _              -> Error "expected 'else'"
   and k_with : unit parser
              = fun input k -> match input with | KWith :: input -> k input ()
                                                | _              -> Error "expected 'with'"
@@ -412,6 +421,21 @@ let parse_decls: token list -> (ast, string) result =
         fin (fun is_rec head_pat arg_pats () rhs () rest -> Some (
           LetIn (Bindings (is_rec, [(head_pat, arg_pats, rhs)]),
                  rest)
+        )))
+      in p' input k
+    | KIf :: input ->
+      (* FIXME: it's wrong to have `;` in the else clause; for example,
+         (if true then 1 else 2; 3) = (if true then 1 else 2); 3 = 3
+                        rather than   if true then 1 else (2; 3) = 1 *)
+      (* FIXME: support omitting else? *)
+      let p' =
+        seq (force_expr @>
+             k_then     @>
+             force_expr @>
+             k_else     @>
+             force_expr @>
+        fin (fun condition_expr () then_expr () else_expr -> Some (
+          IfThenElse (condition_expr, then_expr, else_expr)
         )))
       in p' input k
     | KMatch :: input ->
