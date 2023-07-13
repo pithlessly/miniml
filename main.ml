@@ -146,6 +146,8 @@ and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple      of ('val_id, 'ty_id, 'ty
                                            | IntLit     of int
                                            | StrLit     of string
                                            | Var        of 'val_id
+                                           | LetOpen    of ('val_id, 'ty_id, 'ty_var) mod_expr
+                                                         * ('val_id, 'ty_id, 'ty_var) expr
                                            | App        of ('val_id, 'ty_id, 'ty_var) expr
                                                          * ('val_id, 'ty_id, 'ty_var) expr
                                            | LetIn      of ('val_id, 'ty_id, 'ty_var) bindings
@@ -157,6 +159,7 @@ and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple      of ('val_id, 'ty_id, 'ty
                                            | IfThenElse of ('val_id, 'ty_id, 'ty_var) expr
                                                          * ('val_id, 'ty_id, 'ty_var) expr
                                                          * ('val_id, 'ty_id, 'ty_var) expr
+and  ('val_id, 'ty_id, 'ty_var) mod_expr = | Module of string (* FIXME: change to use 'val_id? *)
 type ('val_id, 'ty_id, 'ty_var) decl     = | Datatype of 'ty_var list * 'ty_id * ('val_id * ('ty_id, 'ty_var) typ list) list
                                            | Alias    of 'ty_var list * 'ty_id * ('ty_id, 'ty_var) typ
                                            | Let      of ('val_id, 'ty_id, 'ty_var) bindings
@@ -539,6 +542,16 @@ let parse_decls: token list -> (ast, string) result =
         k input (Some applications)))
   and expr3 = fun input k ->
     match input with
+    | IdentUpper mod_name :: Dot :: input ->
+      (* NOTE: what we are dong here is desugaring
+             Module.e = Module.(e) = let open Module in e
+         This handles simple cases like `String.foo`, but incorrectly
+         looks up non-existent identifiers in the enclosing scope, so:
+             List.String.print_endline = print_endline
+         *)
+      force "expected expression" expr3 input (fun input sub_expr ->
+        k input (Some (LetOpen (Module mod_name, sub_expr)))
+      )
     | CharLit c    :: input -> k input (Some (CharLit c))
     | IntLit i     :: input -> k input (Some (IntLit i))
     | StrLit s     :: input -> k input (Some (StrLit s))
