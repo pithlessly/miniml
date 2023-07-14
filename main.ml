@@ -163,6 +163,8 @@ and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple      of ('val_id, 'ty_id, 'ty
                                            | IfThenElse of ('val_id, 'ty_id, 'ty_var) expr
                                                          * ('val_id, 'ty_id, 'ty_var) expr
                                                          * ('val_id, 'ty_id, 'ty_var) expr
+                                           | Fun        of ('val_id, 'ty_id, 'ty_var) pat list
+                                                         * ('val_id, 'ty_id, 'ty_var) expr
 and  ('val_id, 'ty_id, 'ty_var) mod_expr = | Module of string (* FIXME: change to use 'val_id? *)
 type ('val_id, 'ty_id, 'ty_var) decl     = | Datatype of 'ty_var list * 'ty_id * ('val_id * ('ty_id, 'ty_var) typ list) list
                                            | Alias    of 'ty_var list * 'ty_id * ('ty_id, 'ty_var) typ
@@ -512,10 +514,18 @@ let parse_decls: token list -> (ast, string) result =
              k_with      @>
              many branch @>
         fin (fun scrutinee () branches -> Some (
-          Match (scrutinee, branches))
-        ))
+          Match (scrutinee, branches)
+        )))
       in p' input k
-    (* TODO: handle 'function', 'fun' *)
+    | KFun :: input ->
+      let p' =
+        seq (many pattern3 @>
+             arrow         @>
+             force_expr    @>
+        fin (fun params () body -> Some (
+          Fun (params, body)
+        )))
+      in p' input k
     | _ -> expr1 input k
   and expr1 = fun input k ->
     expr2 input (fun input first_operand_opt ->
