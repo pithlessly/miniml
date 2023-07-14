@@ -434,7 +434,7 @@ let parse_decls: token list -> (ast, string) result =
       let result = resolve_precedence operands operators (fun op ->
         match op with
         | "|"  -> (0, AssocLeft (fun a b -> POr (a, b)))
-        | "::" -> (1, AssocRight (invalid_arg "TODO: handle cons in patterns"))
+        | "::" -> (1, AssocRight (fun a b -> PCon ("::", Some [a; b])))
         | _    -> invalid_arg "impossible operator")
       in
       k input (Some result)))
