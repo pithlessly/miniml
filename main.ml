@@ -133,6 +133,8 @@ type ('val_id, 'ty_id, 'ty_var) pat      = | POr      of ('val_id, 'ty_id, 'ty_v
                                            | PIntLit  of int
                                            | PStrLit  of string
                                            | PVar     of 'val_id
+                                           | PAsc     of ('val_id, 'ty_id, 'ty_var) pat
+                                                       * (         'ty_id, 'ty_var) typ
                                            | PWild
 type ('val_id, 'ty_id, 'ty_var) bindings = | Bindings of bool                                (* rec? *)
                                                        * ( ('val_id, 'ty_id, 'ty_var) pat      (* head pattern *)
@@ -348,6 +350,13 @@ let parse_decls: token list -> (ast, string) result =
       ty input (fun input t ->
       k input (fun vars name -> Alias (vars, name, t)))
   in
+  let ty_annot: ast_typ option parser =
+    fun input k ->
+    match input with
+    | Colon :: input ->
+      ty input (fun input typ -> k input (Some typ))
+    | _ -> k input None
+  in
 
   let is_rec : bool parser
              = fun input k -> match input with | KRec  :: input -> k input true
@@ -429,7 +438,13 @@ let parse_decls: token list -> (ast, string) result =
               | [single] -> single
               | many     -> PTuple many
     in
-    k input pat))
+    (* type ascription *)
+    ty_annot input (fun input annot ->
+    let pat = match annot with
+              | None -> pat
+              | Some ty -> PAsc (pat, ty)
+    in
+    k input pat)))
   in
 
   let rec expr0 : ast_expr option parser = fun input k ->
