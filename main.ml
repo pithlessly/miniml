@@ -379,8 +379,14 @@ let parse_decls: token list -> (ast, string) result =
     | StrLit s     :: input -> k input (Some (PStrLit s))
     | IdentLower s :: input -> k input (Some (PVar s))
     | KUnder       :: input -> k input (Some PWild)
+    | OpenParen :: CloseParen
+                   :: input -> k input (Some (PTuple []))
+    | OpenParen    :: input -> pattern2 input (fun input e ->
+                               match input with
+                               | CloseParen :: input -> k input (Some e)
+                               | _ -> Error "expected ')'")
     | _                     -> k input None
-  and pattern : ast_pat option parser = fun input k ->
+  and pattern1 : ast_pat option parser = fun input k ->
     pattern0 input (fun input first_operand_opt ->
     match first_operand_opt with
     | None -> k input None
@@ -407,8 +413,23 @@ let parse_decls: token list -> (ast, string) result =
         | _    -> invalid_arg "impossible operator")
       in
       k input (Some result)))
-  and patterns : ast_pat list parser = fun input k ->
-    invalid_arg "TODO"
+  and pattern2 : ast_pat parser = fun input k ->
+    (* first operand *)
+    force "expected pattern" pattern1 input (fun input first_operand ->
+    (* additional operands *)
+    let next_operand: ast_pat option parser = fun input k ->
+      match input with
+      | Comma :: input ->
+        force "expected pattern" pattern1 input (fun input operand ->
+        k input (Some operand))
+      | _ -> k input None
+    in
+    many next_operand input (fun input (operands: ast_pat list) ->
+    let pat = match first_operand :: operands with
+              | [single] -> single
+              | many     -> PTuple many
+    in
+    k input pat))
   in
 
   let rec expr0 : ast_expr option parser = fun input k ->
@@ -416,13 +437,13 @@ let parse_decls: token list -> (ast, string) result =
     | KLet :: input ->
       let p' =
         (* TODO: 'and' *)
-        seq (is_rec       @>
-             force "expected function name or pattern" pattern @>
-             many pattern @>
-             equal        @>
-             force_expr   @>
-             k_in         @>
-             force_expr   @>
+        seq (is_rec        @>
+             force "expected function name or pattern" pattern0 @>
+             many pattern0 @>
+             equal         @>
+             force_expr    @>
+             k_in          @>
+             force_expr    @>
         fin (fun is_rec head_pat arg_pats () rhs () rest -> Some (
           LetIn (Bindings (is_rec, [(head_pat, arg_pats, rhs)]),
                  rest)
@@ -448,7 +469,7 @@ let parse_decls: token list -> (ast, string) result =
         match input with
         | Pipe :: input ->
           let p' =
-            seq (force "expected pattern" pattern @>
+            seq (pattern2   @>
                  arrow      @>
                  force_expr @>
             fin (fun pat () expr -> Some (pat, expr)))
@@ -577,11 +598,11 @@ let parse_decls: token list -> (ast, string) result =
       | KLet :: input ->
         let p' =
           (* TODO: 'and' *)
-          seq (is_rec       @>
-               force "expected function name or pattern" pattern @>
-               many pattern @>
-               equal        @>
-               force_expr   @>
+          seq (is_rec        @>
+               force "expected function name or pattern" pattern0 @>
+               many pattern0 @>
+               equal         @>
+               force_expr    @>
           fin (fun is_rec head_pat arg_pats () rhs ->
             Let (Bindings (is_rec, [(head_pat, arg_pats, rhs)]))
           ))
