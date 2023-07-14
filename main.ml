@@ -299,16 +299,18 @@ let parse_decls: token list -> (ast, string) result =
     in ty_base input go
   and ty: ast_typ parser =
     fun input k ->
+    (* TODO: migrate to use 'many', which is used for binary operators
+       in parsing patterns, expressions, etc. *)
     let rec go input ty_operands ty_operators =
       ty_atomic input (fun input operand ->
       let ty_operands = operand :: ty_operands in
       match input with
-      | IdentSymbol op :: input ->
-        (match op with
-         | "->" | "*" ->
-           let ty_operators = op :: ty_operators in
-           go input ty_operands ty_operators
-         | _ -> Error ("invalid type operator: " ^ op))
+      | Arrow :: input ->
+        go input ty_operands ("->" :: ty_operators)
+      | IdentSymbol "*" :: input ->
+        go input ty_operands ("*" :: ty_operators)
+      | IdentSymbol op :: _ ->
+        Error ("invalid type operator: " ^ op)
       | _ ->
         let ty_expr: ast_typ =
           resolve_precedence
