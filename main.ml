@@ -617,6 +617,7 @@ let parse_decls: token list -> (ast, string) result =
       force "expected expression" expr3 input (fun input sub_expr ->
         k input (Some (LetOpen (Module mod_name, sub_expr)))
       )
+    | IdentUpper s :: input -> k input (Some (Con (s, None))) (* duplicated from expr2 *)
     | CharLit c    :: input -> k input (Some (CharLit c))
     | IntLit i     :: input -> k input (Some (IntLit i))
     | StrLit s     :: input -> k input (Some (StrLit s))
