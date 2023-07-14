@@ -381,7 +381,7 @@ let parse_decls: token list -> (ast, string) result =
                                                | _              -> Error "expected 'with'"
   in
 
-  let rec pattern0 : ast_pat option parser = fun input k ->
+  let rec pattern3 : ast_pat option parser = fun input k ->
     match input with
     | CharLit c    :: input -> k input (Some (PCharLit c))
     | IntLit i     :: input -> k input (Some (PIntLit i))
@@ -390,20 +390,22 @@ let parse_decls: token list -> (ast, string) result =
     | KUnder       :: input -> k input (Some PWild)
     | OpenParen :: CloseParen
                    :: input -> k input (Some (PTuple []))
-    | OpenParen    :: input -> pattern2 input (fun input e ->
+    | OpenParen    :: input -> pattern0 input (fun input e ->
                                match input with
                                | CloseParen :: input -> k input (Some e)
                                | _ -> Error "expected ')'")
     | _                     -> k input None
+  and pattern2 : ast_pat option parser = fun input k ->
+    pattern3 input k
   and pattern1 : ast_pat option parser = fun input k ->
-    pattern0 input (fun input first_operand_opt ->
+    pattern2 input (fun input first_operand_opt ->
     match first_operand_opt with
     | None -> k input None
     | Some first_operand ->
       (* parse a pattern operator and its RHS operand *)
       let next_operand: (string * ast_pat) option parser = fun input k ->
         let continue input s =
-          force "expected pattern" pattern0 input (fun input operand ->
+          force "expected pattern" pattern2 input (fun input operand ->
           k input (Some (s, operand)))
         in
         match input with
@@ -422,7 +424,7 @@ let parse_decls: token list -> (ast, string) result =
         | _    -> invalid_arg "impossible operator")
       in
       k input (Some result)))
-  and pattern2 : ast_pat parser = fun input k ->
+  and pattern0 : ast_pat parser = fun input k ->
     (* first operand *)
     force "expected pattern" pattern1 input (fun input first_operand ->
     (* additional operands *)
@@ -453,8 +455,8 @@ let parse_decls: token list -> (ast, string) result =
       let p' =
         (* TODO: 'and' *)
         seq (is_rec        @>
-             force "expected function name or pattern" pattern0 @>
-             many pattern0 @>
+             force "expected function name or pattern" pattern3 @>
+             many pattern3 @>
              equal         @>
              force_expr    @>
              k_in          @>
@@ -484,7 +486,7 @@ let parse_decls: token list -> (ast, string) result =
         match input with
         | Pipe :: input ->
           let p' =
-            seq (pattern2   @>
+            seq (pattern0   @>
                  arrow      @>
                  force_expr @>
             fin (fun pat () expr -> Some (pat, expr)))
@@ -614,8 +616,8 @@ let parse_decls: token list -> (ast, string) result =
         let p' =
           (* TODO: 'and' *)
           seq (is_rec        @>
-               force "expected function name or pattern" pattern0 @>
-               many pattern0 @>
+               force "expected function name or pattern" pattern3 @>
+               many pattern3 @>
                equal         @>
                force_expr    @>
           fin (fun is_rec head_pat arg_pats () rhs ->
