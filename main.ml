@@ -129,6 +129,7 @@ type (         'ty_id, 'ty_var) typ      = | TVar of 'ty_var
 type ('val_id, 'ty_id, 'ty_var) pat      = | POr      of ('val_id, 'ty_id, 'ty_var) pat
                                                        * ('val_id, 'ty_id, 'ty_var) pat
                                            | PTuple   of ('val_id, 'ty_id, 'ty_var) pat list
+                                           | PList    of ('val_id, 'ty_id, 'ty_var) pat list
                                            | PCon     of 'val_id
                                                        * ('val_id, 'ty_id, 'ty_var) pat list option
                                            | PCharLit of char
@@ -144,6 +145,7 @@ type ('val_id, 'ty_id, 'ty_var) bindings = | Bindings of bool                   
                                                          * ('val_id, 'ty_id, 'ty_var) expr     (* RHS *)
                                                          ) list                              (* multiple, joined by 'and' *)
 and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple      of ('val_id, 'ty_id, 'ty_var) expr list
+                                           | List       of ('val_id, 'ty_id, 'ty_var) expr list
                                            | Con        of 'val_id
                                                          * ('val_id, 'ty_id, 'ty_var) expr list option
                                            | CharLit    of char
@@ -392,6 +394,8 @@ let parse_decls: token list -> (ast, string) result =
     | StrLit s     :: input -> k input (Some (PStrLit s))
     | IdentLower s :: input -> k input (Some (PVar s))
     | KUnder       :: input -> k input (Some PWild)
+    | OpenBracket :: CloseBracket
+                   :: input -> k input (Some (PList []))
     | OpenParen :: CloseParen
                    :: input -> k input (Some (PTuple []))
     | OpenParen    :: input -> pattern0 input (fun input e ->
@@ -622,6 +626,10 @@ let parse_decls: token list -> (ast, string) result =
     | IntLit i     :: input -> k input (Some (IntLit i))
     | StrLit s     :: input -> k input (Some (StrLit s))
     | IdentLower s :: input -> k input (Some (Var s))
+    | OpenBracket :: CloseBracket
+                   :: input -> k input (Some (List []))
+    | OpenParen :: CloseParen
+                   :: input -> k input (Some (Tuple []))
     | OpenParen    :: input ->
       force_expr input (fun input e ->
       match input with
