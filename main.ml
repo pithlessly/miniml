@@ -396,6 +396,7 @@ let parse_decls: token list -> (ast, string) result =
     | KUnder       :: input -> k input (Some PWild)
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (PList []))
+    | OpenBracket  :: _     -> Error "only empty list literals are supported"
     | OpenParen :: CloseParen
                    :: input -> k input (Some (PTuple []))
     | OpenParen    :: input -> pattern0 input (fun input e ->
@@ -623,6 +624,7 @@ let parse_decls: token list -> (ast, string) result =
     | IdentLower s :: input -> k input (Some (Var s))
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (List []))
+    | OpenBracket  :: _     -> Error "only empty list literals are supported"
     | OpenParen :: CloseParen
                    :: input -> k input (Some (Tuple []))
     | OpenParen    :: input ->
