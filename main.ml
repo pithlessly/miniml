@@ -129,6 +129,8 @@ type (         'ty_id, 'ty_var) typ      = | TVar of 'ty_var
 type ('val_id, 'ty_id, 'ty_var) pat      = | POr      of ('val_id, 'ty_id, 'ty_var) pat
                                                        * ('val_id, 'ty_id, 'ty_var) pat
                                            | PTuple   of ('val_id, 'ty_id, 'ty_var) pat list
+                                           | PCon     of 'val_id
+                                                       * ('val_id, 'ty_id, 'ty_var) pat list option
                                            | PCharLit of char
                                            | PIntLit  of int
                                            | PStrLit  of string
@@ -396,7 +398,19 @@ let parse_decls: token list -> (ast, string) result =
                                | _ -> Error "expected ')'")
     | _                     -> k input None
   and pattern2 : ast_pat option parser = fun input k ->
-    pattern3 input k
+    (* NOTE: we don't have the same guard as in expr2 because we aren't bothering
+       to handle the Module.(...) pattern syntax. *)
+    match input with
+    | IdentUpper constructor :: input ->
+      pattern3 input (fun input constructor_args_opt -> k input (
+        (* See NOTE "constructor parsing hack" *)
+        match constructor_args_opt with
+        | None               -> Some (PCon (constructor, None))
+        | Some (PTuple args) -> Some (PCon (constructor, Some args))
+        | Some pat           -> Some (PCon (constructor, Some [pat]))
+      ))
+    (* application isn't a pattern, so we don't have to worry about it :) *)
+    | _ -> pattern3 input k
   and pattern1 : ast_pat option parser = fun input k ->
     pattern2 input (fun input first_operand_opt ->
     match first_operand_opt with
@@ -558,7 +572,8 @@ let parse_decls: token list -> (ast, string) result =
     with
     | (IdentUpper constructor :: input, true) ->
       expr3 input (fun input constructor_args_opt -> k input (
-        (* NOTE: The reader might be wondering: "isn't it hacky to detect
+        (* NOTE "constructor parsing hack":
+           The reader might be wondering: "isn't it hacky to detect
            multi-argument constructors by just matching on whether the
            argument is a tuple literal literal? After all, this would mean
            we would incorrectly parse something like `A ((1, 2))` as a
