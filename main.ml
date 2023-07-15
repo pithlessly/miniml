@@ -178,6 +178,7 @@ type ('val_id, 'ty_id, 'ty_var) decl     = | Let      of ('val_id, 'ty_id, 'ty_v
 
 type ast_typ = (string, string) typ
 type ast_pat = (string, string, string) pat
+type ast_bindings = (string, string, string) bindings
 type ast_expr = (string, string, string) expr
 type ast_typ_decl = (string, string, string) typ_decl
 type ast_decl = (string, string, string) decl
@@ -491,17 +492,11 @@ let parse_decls: token list -> (ast, string) result =
     match input with
     | KLet :: input ->
       let p' =
-        (* TODO: 'and' *)
-        seq (is_rec        @>
-             force "expected function name or pattern" pattern3 @>
-             many pattern3 @>
-             equal         @>
-             force_expr    @>
+        seq (val_bindings  @>
              k_in          @>
              force_expr    @>
-        fin (fun is_rec head_pat arg_pats () rhs () rest -> Some (
-          LetIn (Bindings (is_rec, (head_pat, arg_pats, rhs) :: []),
-                 rest)
+        fin (fun bindings () rest -> Some (
+          LetIn (bindings, rest)
         )))
       in p' input k
     | KIf :: input ->
@@ -650,7 +645,24 @@ let parse_decls: token list -> (ast, string) result =
       | CloseParen :: input -> k input (Some e)
       | _ -> Error "expected ')'")
     | _ -> k input None
-  and force_expr input k = force "Expected expression" expr0 input k in
+  and force_expr input k = force "Expected expression" expr0 input k
+  and val_binding : (ast_pat * ast_pat list * ast_expr) option parser = fun input k ->
+    match input with
+    | KAnd :: input ->
+      let p' =
+        (* TODO: 'and' *)
+        seq (force "expected function name or pattern" pattern3 @>
+             many pattern3 @>
+             equal         @>
+             force_expr    @>
+        fin (fun head_pat arg_pats () rhs -> Some (head_pat, arg_pats, rhs)))
+      in p' input k
+    | _ -> k input None
+  and val_bindings : ast_bindings parser = fun input k ->
+    is_rec input (fun input is_rec ->
+    many val_binding (dummy KAnd input) (fun input bindings ->
+    k input (Bindings (is_rec, bindings))))
+  in
 
   let decls =
     many (fun input k ->
@@ -659,18 +671,8 @@ let parse_decls: token list -> (ast, string) result =
         many ty_decl (dummy KAnd input) (fun input ty_decls ->
         k input (Some (Types ty_decls)))
       | KLet :: input ->
-        let p' =
-          (* TODO: 'and' *)
-          seq (is_rec        @>
-               force "expected function name or pattern" pattern3 @>
-               many pattern3 @>
-               equal         @>
-               force_expr    @>
-          fin (fun is_rec head_pat arg_pats () rhs ->
-            Bindings (is_rec, (head_pat, arg_pats, rhs) :: [])
-          ))
-        in p' input (fun input bindings ->
-          k input (Some (Let bindings)))
+        val_bindings input (fun input bindings ->
+        k input (Some (Let bindings)))
       | _ -> k input None
     )
   in
