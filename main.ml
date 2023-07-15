@@ -126,6 +126,8 @@ let lex str =
 
 type (         'ty_id, 'ty_var) typ      = | TVar of 'ty_var
                                            | TCon of 'ty_id * ('ty_id, 'ty_var) typ list
+type ('val_id, 'ty_id, 'ty_var) typ_decl = | Datatype of ('val_id * ('ty_id, 'ty_var) typ list) list
+                                           | Alias    of ('ty_id, 'ty_var) typ
 type ('val_id, 'ty_id, 'ty_var) pat      = | POr      of ('val_id, 'ty_id, 'ty_var) pat
                                                        * ('val_id, 'ty_id, 'ty_var) pat
                                            | PTuple   of ('val_id, 'ty_id, 'ty_var) pat list
@@ -168,13 +170,16 @@ and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple      of ('val_id, 'ty_id, 'ty
                                            | Fun        of ('val_id, 'ty_id, 'ty_var) pat list
                                                          * ('val_id, 'ty_id, 'ty_var) expr
 and  ('val_id, 'ty_id, 'ty_var) mod_expr = | Module of string (* FIXME: change to use 'val_id? *)
-type ('val_id, 'ty_id, 'ty_var) decl     = | Datatype of 'ty_var list * 'ty_id * ('val_id * ('ty_id, 'ty_var) typ list) list
-                                           | Alias    of 'ty_var list * 'ty_id * ('ty_id, 'ty_var) typ
-                                           | Let      of ('val_id, 'ty_id, 'ty_var) bindings
+type ('val_id, 'ty_id, 'ty_var) decl     = | Let      of ('val_id, 'ty_id, 'ty_var) bindings
+                                           | Types    of ( 'ty_var list
+                                                         * 'ty_id
+                                                         * ('val_id, 'ty_id, 'ty_var) typ_decl
+                                                         ) list
 
 type ast_typ = (string, string) typ
 type ast_pat = (string, string, string) pat
 type ast_expr = (string, string, string) expr
+type ast_typ_decl = (string, string, string) typ_decl
 type ast_decl = (string, string, string) decl
 type ast = ast_decl list
 
@@ -333,29 +338,40 @@ let parse_decls: token list -> (ast, string) result =
         in k input ty_expr)
     in go input [] []
   in
-  let ty_decl: (string list -> string -> ast_decl) parser =
+  let ty_decl: (string list * string * ast_typ_decl) option parser =
     fun input k ->
     match input with
-    | Pipe :: _ ->
-      let rec adt_constructors input cs =
-        match input with
-        | Pipe :: IdentUpper c :: KOf :: input ->
-          let rec go input ts =
-            match input with
-            | IdentSymbol "*" :: input ->
-              ty_atomic input (fun input t -> go input (t :: ts))
-            | _ ->
-              adt_constructors input ((c, List.rev ts) :: cs)
-          (* artificially prepend "*" to the input stream
-             to simplify the parsing here *)
-          in go (IdentSymbol "*" :: input) []
-        | Pipe :: IdentUpper c :: input ->
-          adt_constructors input ((c, []) :: cs)
-        | _ -> k input (fun vars name -> Datatype (vars, name, List.rev cs))
-      in adt_constructors input []
-    | _ ->
-      ty input (fun input t ->
-      k input (fun vars name -> Alias (vars, name, t)))
+    | KAnd :: input ->
+      let p' =
+        seq (ty_params @>
+             ty_name   @>
+             (
+                fun input k ->
+                match input with
+                | Pipe :: _ ->
+                  let rec adt_constructors input cs =
+                    match input with
+                    | Pipe :: IdentUpper c :: KOf :: input ->
+                      let rec go input ts =
+                        match input with
+                        | IdentSymbol "*" :: input ->
+                          ty_atomic input (fun input t -> go input (t :: ts))
+                        | _ ->
+                          adt_constructors input ((c, List.rev ts) :: cs)
+                      (* artificially prepend "*" to the input stream
+                         to simplify the parsing here *)
+                      in go (IdentSymbol "*" :: input) []
+                    | Pipe :: IdentUpper c :: input ->
+                      adt_constructors input ((c, []) :: cs)
+                    | _ -> k input (Datatype (List.rev cs))
+                  in adt_constructors input []
+                | _ ->
+                  ty input (fun input t -> k input (Alias t))
+             ) @>
+        fin (fun vars name decl -> Some (vars, name, decl)))
+      in
+      p' input k
+    | _ -> k input None
   in
   let ty_annot: ast_typ option parser =
     fun input k ->
@@ -640,10 +656,8 @@ let parse_decls: token list -> (ast, string) result =
     let rec go input decls =
       match input with
       | KType :: input ->
-        let p' =
-          seq (ty_params @> ty_name @> ty_decl @>
-          fin (fun vars name mk_decl -> mk_decl vars name))
-        in p' input (fun input decl -> go input (decl :: decls))
+        many ty_decl (dummy KAnd input) (fun input ty_decls ->
+        go input (Types ty_decls :: decls))
       | KLet :: input ->
         let p' =
           (* TODO: 'and' *)
