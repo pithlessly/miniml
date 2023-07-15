@@ -259,6 +259,7 @@ let many (p: 'a option parser): 'a list parser =
                                     | Some x -> go input (x :: acc)
                                     | None -> k input (List.rev acc))
     in go input []
+let dummy tok input = tok :: input
 
 let parse_decls: token list -> (ast, string) result =
   (* parsing specific tokens *)
@@ -292,7 +293,7 @@ let parse_decls: token list -> (ast, string) result =
           | _ -> Error "couldn't finish parsing type argument list"
         (* artificially prepend "," to the input stream
            to simplify the parsing here *)
-        in go (Comma :: input) []
+        in go (dummy Comma input) []
       | _ -> Error "couldn't start parsing a type"
     in
     fun input k ->
