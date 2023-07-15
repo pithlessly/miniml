@@ -652,12 +652,12 @@ let parse_decls: token list -> (ast, string) result =
     | _ -> k input None
   and force_expr input k = force "Expected expression" expr0 input k in
 
-  let decls input k =
-    let rec go input decls =
+  let decls =
+    many (fun input k ->
       match input with
       | KType :: input ->
         many ty_decl (dummy KAnd input) (fun input ty_decls ->
-        go input (Types ty_decls :: decls))
+        k input (Some (Types ty_decls)))
       | KLet :: input ->
         let p' =
           (* TODO: 'and' *)
@@ -667,11 +667,12 @@ let parse_decls: token list -> (ast, string) result =
                equal         @>
                force_expr    @>
           fin (fun is_rec head_pat arg_pats () rhs ->
-            Let (Bindings (is_rec, (head_pat, arg_pats, rhs) :: []))
+            Bindings (is_rec, (head_pat, arg_pats, rhs) :: [])
           ))
-        in p' input (fun input decl -> go input (decl :: decls))
-      | _ -> k input (List.rev decls)
-    in go input []
+        in p' input (fun input bindings ->
+          k input (Some (Let bindings)))
+      | _ -> k input None
+    )
   in
 
   fun tokens ->
