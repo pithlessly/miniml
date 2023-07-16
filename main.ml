@@ -268,7 +268,7 @@ let many (p: 'a option parser): 'a list parser =
 let dummy tok input = tok :: input
 
 let parse_decls: token list -> (ast, string) result =
-  (* parsing specific tokens *)
+  (* parsing types *)
   let ty_params: string list parser =
     fun input k ->
     match input with
@@ -382,6 +382,7 @@ let parse_decls: token list -> (ast, string) result =
     | _ -> k input None
   in
 
+  (* helpers for parsing specific tokens *)
   let is_rec : bool parser
              = fun input k -> match input with | KRec  :: input -> k input true
                                                | _              -> k input false
@@ -405,6 +406,7 @@ let parse_decls: token list -> (ast, string) result =
                                                | _              -> Error "expected 'with'"
   in
 
+  (* parsing patterns *)
   let rec pattern3 : ast_pat option parser = fun input k ->
     match input with
     | CharLit c    :: input -> k input (Some (PCharLit c))
@@ -488,6 +490,7 @@ let parse_decls: token list -> (ast, string) result =
     k input pat)))
   in
 
+  (* parsing expressions *)
   let rec expr0 : ast_expr option parser = fun input k ->
     match input with
     | KLet :: input ->
