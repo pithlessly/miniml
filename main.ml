@@ -419,6 +419,8 @@ let parse_decls: token list -> (ast, string) result =
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (PList []))
     | OpenBracket  :: _     -> Error "only empty list literals are supported"
+    | OpenParen :: IdentSymbol s :: CloseParen
+                   :: input -> k input (Some (PVar s))
     | OpenParen :: CloseParen
                    :: input -> k input (Some (PTuple []))
     | OpenParen    :: input -> pattern0 input (fun input e ->
