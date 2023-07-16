@@ -26,7 +26,7 @@ type token =
 
 let lex str =
   (* character properties *)
-  let lower c = ('a' <= c && c <= 'z') || c = '_' in
+  let lower c = ('a' <= c && c <= 'z') || c = '_' || c = '\'' in
   let upper c = 'A' <= c && c <= 'Z' in
   let numer c = '0' <= c && c <= '9' in
   let ident c = upper c || lower c || numer c in
