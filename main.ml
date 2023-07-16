@@ -204,7 +204,7 @@ let resolve_precedence (operands: 'a list) (operators: 'o list)
       let (o_prec, assoc) = operator_info o in
       if o_prec < prec then
         (x, xs, o :: opers)
-      else begin
+      else (
         match assoc with
         | AssocLeft f ->
           let (rhs, xs, opers) = go (o_prec + 1) xs opers in
@@ -231,7 +231,7 @@ let resolve_precedence (operands: 'a list) (operators: 'o list)
           in
           let (args, xs, opers) = walk_nary (x :: []) xs opers in
           go prec (f (List.rev args) :: xs) opers
-      end
+      )
     | _ -> invalid_arg "input lists weren't the appropriate lengths"
   in
   match go 0 operands operators with
