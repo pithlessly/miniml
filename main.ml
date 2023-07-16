@@ -650,7 +650,6 @@ let parse_decls: token list -> (ast, string) result =
     match input with
     | KAnd :: input ->
       let p' =
-        (* TODO: 'and' *)
         seq (force "expected function name or pattern" pattern3 @>
              many pattern3 @>
              equal         @>
