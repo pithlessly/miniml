@@ -141,11 +141,12 @@ type ('val_id, 'ty_id, 'ty_var) pat      = | POr      of ('val_id, 'ty_id, 'ty_v
                                            | PAsc     of ('val_id, 'ty_id, 'ty_var) pat
                                                        * (         'ty_id, 'ty_var) typ
                                            | PWild
-type ('val_id, 'ty_id, 'ty_var) bindings = | Bindings of bool                                (* rec? *)
-                                                       * ( ('val_id, 'ty_id, 'ty_var) pat      (* head pattern *)
-                                                         * ('val_id, 'ty_id, 'ty_var) pat list (* argument patterns *)
-                                                         * ('val_id, 'ty_id, 'ty_var) expr     (* RHS *)
-                                                         ) list                              (* multiple, joined by 'and' *)
+type ('val_id, 'ty_id, 'ty_var) binding  =   ('val_id, 'ty_id, 'ty_var) pat        (* head pattern *)
+                                           * ('val_id, 'ty_id, 'ty_var) pat list   (* argument patterns *)
+                                           * (         'ty_id, 'ty_var) typ option (* return type annotation *)
+                                           * ('val_id, 'ty_id, 'ty_var) expr       (* RHS *)
+and  ('val_id, 'ty_id, 'ty_var) bindings = | Bindings of bool (* recursive? *)
+                                                       * ('val_id, 'ty_id, 'ty_var) binding list
 and  ('val_id, 'ty_id, 'ty_var) expr     = | Tuple      of ('val_id, 'ty_id, 'ty_var) expr list
                                            | List       of ('val_id, 'ty_id, 'ty_var) expr list
                                            | Con        of 'val_id
@@ -178,6 +179,7 @@ type ('val_id, 'ty_id, 'ty_var) decl     = | Let      of ('val_id, 'ty_id, 'ty_v
 
 type ast_typ = (string, string) typ
 type ast_pat = (string, string, string) pat
+type ast_binding = (string, string, string) binding
 type ast_bindings = (string, string, string) bindings
 type ast_expr = (string, string, string) expr
 type ast_typ_decl = (string, string, string) typ_decl
@@ -649,15 +651,16 @@ let parse_decls: token list -> (ast, string) result =
       | _ -> Error "expected ')'")
     | _ -> k input None
   and force_expr input k = force "Expected expression" expr0 input k
-  and val_binding : (ast_pat * ast_pat list * ast_expr) option parser = fun input k ->
+  and val_binding : ast_binding option parser = fun input k ->
     match input with
     | KAnd :: input ->
       let p' =
         seq (force "expected function name or pattern" pattern3 @>
              many pattern3 @>
+             ty_annot      @>
              equal         @>
              force_expr    @>
-        fin (fun head_pat arg_pats () rhs -> Some (head_pat, arg_pats, rhs)))
+        fin (fun head_pat arg_pats annot () rhs -> Some (head_pat, arg_pats, annot, rhs)))
       in p' input k
     | _ -> k input None
   and val_bindings : ast_bindings parser = fun input k ->
