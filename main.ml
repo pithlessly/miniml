@@ -31,7 +31,7 @@ let lex str =
   let numer c = '0' <= c && c <= '9' in
   let ident c = upper c || lower c || numer c in
   let symbolic c = match c with | '&' | '*' | '+' | '-' | '.' | ':'
-                                | '<' | '>' | '=' | '^' | '|' -> true
+                                | '<' | '>' | '=' | '^' | '|' | '@' -> true
                                 | _ -> false
   in
   (* main logic *)
