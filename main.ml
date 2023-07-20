@@ -723,18 +723,27 @@ type ctx = core_var list
 let lookup : string -> ctx -> core_var option =
   fun name -> List.find_opt (fun (Var (name', _, _, _)) -> name = name')
 
-let rec infer : ctx -> ast_expr -> (core_expr * core_type, string) result = fun ctx e ->
-  match e with
-  | CharLit c -> Ok (CharLit c, CCon ("char", []))
-  | Var s -> (match lookup s ctx with
-              | None -> Error ("variable not in scope: " ^ s)
-              | Some v ->
-                match v with
-                | Var (_, _, [], ty) -> Ok (Var v, ty)
-                | _ -> invalid_arg "TODO: support instantiation")
-
 let elab (ast : ast) : (core, string) result =
   let next_var_id = counter () in
+  let rec infer : ctx -> ast_expr -> (core_expr * core_type, string) result = fun ctx e ->
+    match e with
+    | Tuple es ->
+      (* TODO: write mapM *)
+      let rec go es acc =
+        match es with
+        | []      -> Ok (List.rev acc)
+        | e :: es -> infer ctx e >>= (fun (t', e) -> go es ((t', e) :: acc))
+      in
+      go es [] >>= (fun elab -> Ok (Tuple (List.map fst elab),
+                                    CCon ("*", List.map snd elab)))
+    | CharLit c -> Ok (CharLit c, CCon ("char", []))
+    | Var s -> (match lookup s ctx with
+                | None -> Error ("variable not in scope: " ^ s)
+                | Some v ->
+                  match v with
+                  | Var (_, _, [], ty) -> Ok (Var v, ty)
+                  | _ -> invalid_arg "TODO: support instantiation")
+  in
   let rec go ctx acc decls =
     match decls with
     | [] -> Ok (List.rev acc)
