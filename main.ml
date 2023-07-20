@@ -267,7 +267,7 @@ let many (p: 'a option parser): 'a list parser =
     in go input []
 let dummy tok input = tok :: input
 
-let parse_decls: token list -> (ast, string) result =
+let parse: token list -> (ast, string) result =
   (* parsing types *)
   let ty_params: string list parser =
     fun input k ->
@@ -687,6 +687,9 @@ let parse_decls: token list -> (ast, string) result =
   match remaining with | [] -> Ok ds
                        | _ -> Error "unexpected tokens at EOF")
 
+let (=<<) f x = match x with | Ok a -> f a | Error e -> Error e
+let (>>=) x f = (=<<) f x
+
 let text =
   let f = In_channel.open_text "scratchpad.mini-ml" in
   let text = In_channel.input_all f in
@@ -694,7 +697,6 @@ let text =
   text
 
 let ast =
-  let (=<<) f x = match x with | Ok a -> f a | Error e -> Error e in
-  parse_decls =<<
+  parse =<<
     lex text
 
