@@ -687,8 +687,67 @@ let parse: token list -> (ast, string) result =
   match remaining with | [] -> Ok ds
                        | _ -> Error "unexpected tokens at EOF")
 
+type core_level = int
+type core_var_id = int
+type core_qvar = | QVar of string * core_var_id
+type core_type = | CQVar of core_qvar
+                 | CUVar of core_uvar ref
+                 | CCon  of string * core_type list
+and  core_uvar = | Unknown of string * core_level | Known of core_type
+type core_ctx = (string * core_type) list
+type core_var  = | Var of string (* name in the syntax *)
+                        * core_var_id (* numeric ID *)
+                        * core_qvar list (* forall parameters *)
+                        * core_type (* type *)
+
+type core_pat = (core_var, unit) pat
+type core_binding = (core_var, unit) binding
+type core_bindings = (core_var, unit) bindings
+type core_expr = (core_var, unit) expr
+type core_typ_decl = (core_var, unit) typ_decl
+type core_decl = (core_var, unit) decl
+type core = core_decl list
+
+(* some helpers for reference operations *)
+let deref = (!)
 let (=<<) f x = match x with | Ok a -> f a | Error e -> Error e
 let (>>=) x f = (=<<) f x
+let counter () =
+  let i = ref 0 in
+  (fun () ->
+    let v = deref i in
+    i := 1 + v;
+    v)
+
+type ctx = core_var list
+let lookup : string -> ctx -> core_var option =
+  fun name -> List.find_opt (fun (Var (name', _, _, _)) -> name = name')
+
+let rec infer : ctx -> ast_expr -> (core_expr * core_type, string) result = fun ctx e ->
+  match e with
+  | CharLit c -> Ok (CharLit c, CCon ("char", []))
+  | Var s -> (match lookup s ctx with
+              | None -> Error ("variable not in scope: " ^ s)
+              | Some v ->
+                match v with
+                | Var (_, _, [], ty) -> Ok (Var v, ty)
+                | _ -> invalid_arg "TODO: support instantiation")
+
+let elab (ast : ast) : (core, string) result =
+  let next_var_id = counter () in
+  let rec go ctx acc decls =
+    match decls with
+    | [] -> Ok (List.rev acc)
+    | Let (Bindings (false, ((PVar name, [], None, e) :: []))) :: decls ->
+      infer ctx e >>= fun (e', t) ->
+        let v = Var (name, next_var_id (), [], t) in
+        go (v :: ctx)
+           (Let (Bindings (false, ((PVar v, [], (* TODO: use types to ensure Core has no annotations? *)
+                                             None, e') :: []))
+                ) :: acc)
+           decls
+    | _ :: _ -> Error "this type of binding is not yet supported"
+  in go [] [] ast
 
 let text =
   let f = In_channel.open_text "scratchpad.mini-ml" in
@@ -697,6 +756,5 @@ let text =
   text
 
 let ast =
-  parse =<<
-    lex text
+  elab =<< (parse =<< lex text)
 
