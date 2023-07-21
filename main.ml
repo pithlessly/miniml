@@ -719,6 +719,63 @@ let counter () =
     i := 1 + v;
     v)
 
+let rec occurs_check : core_uvar ref -> core_type -> (unit, string) result = fun v ty ->
+  match ty with
+  | CQVar _ -> Ok ()
+  | CCon (_, tys) ->
+    let rec go tys =
+      match tys with
+      | []         -> Ok ()
+      | ty' :: tys -> occurs_check v ty' >>= fun () -> go tys
+    in go tys
+  | CUVar v' ->
+    if v == v' then
+      Error "occurs check failed (cannot construct infinite type)"
+    else
+      match deref v' with
+      | Known ty'         -> occurs_check v ty'
+      | Unknown (_, lvl') ->
+        Ok (
+          match deref v with
+          | Known _             -> ()
+          | Unknown (name, lvl) -> v := Unknown (name, min lvl lvl')
+        )
+
+(* follow `Known`s until we get where we wanted *)
+let ground : core_type -> core_type =
+  let rec go ty (obligations : core_uvar ref list) =
+    match ty with
+    | CUVar r -> (
+        match deref r with
+        | Known ty -> go ty (r :: obligations)
+        | _ -> (ty, obligations)
+      )
+    | _ -> (ty, obligations)
+  in
+  fun ty ->
+    let (ty, obligations) = go ty [] in
+    (* path compression *)
+    List.iter (fun r -> r := Known ty) obligations;
+    ty
+
+let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
+  (* FIXME: void physical equality on types? *)
+  if t1 == t2 then Ok () else
+  match (ground t1, ground t2) with
+  | (CUVar r, t') | (t', CUVar r) ->
+    (* r must be Unknown *)
+    occurs_check r t' >>= (fun () -> Ok (r := Known t'))
+  | (CCon (c1, p1), CCon (c2, p2)) ->
+    if c1 != c2 then Error ("cannot unify different type constructors: " ^ c1 ^ " != " ^ c2)
+    else unify_all p1 p2
+  | _ ->
+    Error "cannot unify different types (probably QVar and Con)?"
+and unify_all : core_type list -> core_type list -> (unit, string) result = fun ts1 ts2 ->
+  match (ts1, ts2) with
+  | ([], []) -> Ok ()
+  | (t1 :: ts1, t2 :: ts2) -> unify t1 t2 >>= (fun () -> unify_all ts1 ts2)
+  | _ -> Error "cannot unify different numbers of arguments"
+
 type ctx = core_var list
 let lookup : string -> ctx -> core_var option =
   fun name -> List.find_opt (fun (Var (name', _, _, _)) -> name = name')
