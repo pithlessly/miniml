@@ -795,6 +795,8 @@ let elab (ast : ast) : (core, string) result =
       go es [] >>= (fun elab -> Ok (Tuple (List.map fst elab),
                                     CCon ("*", List.map snd elab)))
     | CharLit c -> Ok (CharLit c, CCon ("char", []))
+    | IntLit i -> Ok (IntLit i, CCon ("int", []))
+    | StrLit s -> Ok (StrLit s, CCon ("string", []))
     | Var s -> (match lookup s ctx with
                 | None -> Error ("variable not in scope: " ^ s)
                 | Some v ->
