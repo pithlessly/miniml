@@ -782,14 +782,15 @@ let lookup : string -> ctx -> core_var option =
 
 let elab (ast : ast) : (core, string) result =
   let next_var_id = counter () in
-  let rec infer : ctx -> ast_expr -> (core_expr * core_type, string) result = fun ctx e ->
+  let rec infer : core_level -> ctx -> ast_expr -> (core_expr * core_type, string) result =
+    fun lvl ctx e ->
     match e with
     | Tuple es ->
       (* TODO: write mapM *)
       let rec go es acc =
         match es with
         | []      -> Ok (List.rev acc)
-        | e :: es -> infer ctx e >>= (fun (t', e) -> go es ((t', e) :: acc))
+        | e :: es -> infer lvl ctx e >>= (fun (e', t) -> go es ((e', t) :: acc))
       in
       go es [] >>= (fun elab -> Ok (Tuple (List.map fst elab),
                                     CCon ("*", List.map snd elab)))
@@ -805,7 +806,7 @@ let elab (ast : ast) : (core, string) result =
     match decls with
     | [] -> Ok (List.rev acc)
     | Let (Bindings (false, ((PVar name, [], None, e) :: []))) :: decls ->
-      infer ctx e >>= fun (e', t) ->
+      infer 0 ctx e >>= fun (e', t) ->
         let v = Var (name, next_var_id (), [], t) in
         go (v :: ctx)
            (Let (Bindings (false, ((PVar v, [], (* TODO: use types to ensure Core has no annotations? *)
