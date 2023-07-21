@@ -789,6 +789,10 @@ let elab (ast : ast) : (core, string) result =
                | None   -> string_of_int (next_uvar_name ())
     in ref (Unknown (name, lvl))
   in
+  let generalize : core_level -> core_type -> core_qvar list * core_type =
+    (* TODO: implement correctly *)
+    fun lvl ty -> ([], ty)
+  in
   let rec infer : core_level -> ctx -> ast_expr -> (core_expr * core_type, string) result =
     fun lvl ctx e ->
     match e with
@@ -817,6 +821,16 @@ let elab (ast : ast) : (core, string) result =
       let ty_res = CUVar uv in
       unify ty_fun (CCon ("->", (ty_arg :: ty_res :: []))) >>= fun () ->
       Ok (App (e1', e2'), ground ty_res)
+    | LetIn (Bindings (false, ((PVar s, [], None, e1) :: [])), e2) ->
+      infer (lvl + 1) ctx e1 >>= fun (e1', ty_e1) ->
+      let scheme = generalize lvl ty_e1 in
+      let v = Var (s, next_var_id (), fst scheme, snd scheme) in
+      infer lvl (v :: ctx) e2 >>= fun (e2', ty_e2) ->
+      Ok (
+        LetIn (Bindings (false, ((PVar v, [], None, e1') :: [])),
+               e2'),
+        ground ty_e2
+      )
   in
   let rec go ctx acc decls =
     match decls with
