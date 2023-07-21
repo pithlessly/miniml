@@ -782,6 +782,13 @@ let lookup : string -> ctx -> core_var option =
 
 let elab (ast : ast) : (core, string) result =
   let next_var_id = counter () in
+  let next_uvar_name = counter () in
+  let new_uvar lvl name () : core_uvar ref =
+    let name = match name with
+               | Some n -> n
+               | None   -> string_of_int (next_uvar_name ())
+    in ref (Unknown (name, lvl))
+  in
   let rec infer : core_level -> ctx -> ast_expr -> (core_expr * core_type, string) result =
     fun lvl ctx e ->
     match e with
@@ -803,6 +810,13 @@ let elab (ast : ast) : (core, string) result =
                   match v with
                   | Var (_, _, [], ty) -> Ok (Var v, ty)
                   | _ -> invalid_arg "TODO: support instantiation")
+    | App (e1, e2) ->
+      infer lvl ctx e1 >>= fun (e1', ty_fun) ->
+      infer lvl ctx e2 >>= fun (e2', ty_arg) ->
+      let uv = new_uvar lvl None () in
+      let ty_res = CUVar uv in
+      unify ty_fun (CCon ("->", (ty_arg :: ty_res :: []))) >>= fun () ->
+      Ok (App (e1', e2'), ground ty_res)
   in
   let rec go ctx acc decls =
     match decls with
