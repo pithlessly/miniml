@@ -693,7 +693,8 @@ type core_qvar = | QVar of string * core_var_id
 type core_type = | CQVar of core_qvar
                  | CUVar of core_uvar ref
                  | CCon  of string * core_type list
-and  core_uvar = | Unknown of string * core_level | Known of core_type
+and  core_uvar = | Unknown of string * core_var_id * core_level
+                 | Known of core_type
 type core_ctx = (string * core_type) list
 type core_var  = | Var of string (* name in the syntax *)
                         * core_var_id (* numeric ID *)
@@ -734,11 +735,11 @@ let rec occurs_check : core_uvar ref -> core_type -> (unit, string) result = fun
     else
       match deref v' with
       | Known ty'         -> occurs_check v ty'
-      | Unknown (_, lvl') ->
+      | Unknown (_, _, lvl') ->
         Ok (
           match deref v with
           | Known _             -> ()
-          | Unknown (name, lvl) -> v := Unknown (name, min lvl lvl')
+          | Unknown (name, id, lvl) -> v := Unknown (name, id, min lvl lvl')
         )
 
 (* follow `Known`s until we get where we wanted *)
@@ -759,17 +760,18 @@ let ground : core_type -> core_type =
     ty
 
 let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
-  (* FIXME: void physical equality on types? *)
+  (* FIXME: avoid physical equality on types? *)
   if t1 == t2 then Ok () else
   match (ground t1, ground t2) with
+  | (CQVar _, _) | (_, CQVar _) ->
+    (* FIXME: ideally it would be possible to rule this out in the type system? *)
+    Error "found CQVar - should be impossible"
   | (CUVar r, t') | (t', CUVar r) ->
     (* r must be Unknown *)
     occurs_check r t' >>= (fun () -> Ok (r := Known t'))
   | (CCon (c1, p1), CCon (c2, p2)) ->
     if c1 != c2 then Error ("cannot unify different type constructors: " ^ c1 ^ " != " ^ c2)
     else unify_all p1 p2
-  | _ ->
-    Error "cannot unify different types (probably QVar and Con)?"
 and unify_all : core_type list -> core_type list -> (unit, string) result = fun ts1 ts2 ->
   match (ts1, ts2) with
   | ([], []) -> Ok ()
@@ -784,10 +786,12 @@ let elab (ast : ast) : (core, string) result =
   let next_var_id = counter () in
   let next_uvar_name = counter () in
   let new_uvar lvl name () : core_uvar ref =
+    let id = next_uvar_name () in
     let name = match name with
                | Some n -> n
-               | None   -> string_of_int (next_uvar_name ())
-    in ref (Unknown (name, lvl))
+               (* TODO: do this calculation lazily? *)
+               | None   -> string_of_int id
+    in ref (Unknown (name, id, lvl))
   in
   let generalize : core_level -> core_type -> core_qvar list * core_type =
     (* TODO: implement correctly *)
