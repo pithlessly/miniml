@@ -836,6 +836,25 @@ let elab (ast : ast) : (core, string) result =
                     | CCon (s, tys) -> CCon (s, List.map go tys)
     in go
   in
+  let rec infer_pat lvl : ctx -> ast_pat -> (ctx * core_pat * core_type, string) result =
+    fun ctx pat ->
+    match pat with
+    | PVar s ->
+      (* TODO: pick name lazily *)
+      let ty = CUVar (new_uvar lvl (Some ("(type of " ^ s ^ ")")) ()) in
+      let v = Var (s, next_var_id (), [], ty) in
+      Ok (v :: ctx, PVar v, ty)
+    | PWild ->
+      let ty = CUVar (new_uvar lvl (Some "(type of _)") ()) in
+      Ok (ctx, PWild, ty)
+    (* TODO: implement POr, PTuple, PList, PCon, PCharLit, PIntLit, PStrLit, PAsc *)
+  and infer_pats lvl : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list, string) result =
+    let rec go acc ctx pats = match pats with
+                              | []          -> Ok (ctx, List.rev acc)
+                              | pat :: pats -> infer_pat lvl ctx pat >>= fun (ctx, pat, ty) ->
+                                               go ((pat, ty) :: acc) ctx pats
+    in go []
+  in
   let rec infer : core_level -> ctx -> ast_expr -> (core_expr * core_type, string) result =
     fun lvl ctx e ->
     match e with
@@ -875,14 +894,11 @@ let elab (ast : ast) : (core, string) result =
                e2'),
         ground ty_e2
       )
-    | Fun (PVar s :: [], e) ->
-      (* TODO: pick name lazily *)
-      let uv = new_uvar lvl (Some ("(type of " ^ s ^ ")")) () in
-      let ty_arg = CUVar uv in
-      let v = Var (s, next_var_id (), [], ty_arg) in
-      infer lvl (v :: ctx) e >>= fun (e', ty_res) ->
+    | Fun (pat :: [], e) ->
+      infer_pat lvl ctx pat >>= fun (ctx', pat', ty_arg) ->
+      infer lvl ctx' e >>= fun (e', ty_res) ->
       Ok (
-        Fun (PVar v :: [], e'),
+        Fun (pat' :: [], e'),
         CCon ("->", ty_arg :: ty_res :: [])
       )
   in
