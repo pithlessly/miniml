@@ -857,8 +857,7 @@ let elab (ast : ast) : (core, string) result =
                   match v with
                   | Var (_, _, qvars, ty) ->
                     let ty = instantiate lvl qvars ty in
-                    Ok (Var v, ty)
-                  | _ -> invalid_arg "TODO: support instantiation")
+                    Ok (Var v, ty))
     | App (e1, e2) ->
       infer lvl ctx e1 >>= fun (e1', ty_fun) ->
       infer lvl ctx e2 >>= fun (e2', ty_arg) ->
