@@ -794,9 +794,9 @@ let elab (ast : ast) : (core, string) result =
     in ref (Unknown (name, id, lvl))
   in
   let generalize (lvl : core_level) : core_type -> core_qvar list * core_type =
-    let rec go ((qvars : (core_var_id * core_qvar) list), ty) =
+    let rec go (qvars, ty) =
       match ty with
-      | CQVar _ -> (qvars, ty) (* should be impossible *)
+      | CQVar qv -> (qvars, ty)
       | CCon (c, tys) ->
         let (qvars, tys) = go_all [] qvars tys in
         (qvars, (CCon (c, tys)))
@@ -805,11 +805,10 @@ let elab (ast : ast) : (core, string) result =
         | Known ty -> go (qvars, ty)
         | Unknown (name, id, lvl') ->
           if lvl' > lvl then
-            match List.find_opt (fun (id', _) -> id = id') qvars with
-            | Some (_, qv) -> (qvars, CQVar qv)
-            | None         -> let qv = QVar (name, next_var_id ()) in
-                              let qvars = (id, qv) :: qvars in
-                              (qvars, CQVar qv)
+            let qv = QVar (name, next_var_id ()) in
+            let qvars = qv :: qvars in
+            r := Known (CQVar qv);
+            (qvars, CQVar qv)
           else
             (qvars, ty)
     and go_all acc qvars tys =
@@ -820,7 +819,7 @@ let elab (ast : ast) : (core, string) result =
         go_all (ty :: acc) qvars tys
     in fun ty ->
       let (qvars, ty) = go ([], ty) in
-      (List.map snd qvars, ty)
+      (qvars, ty)
   in
   let rec infer : core_level -> ctx -> ast_expr -> (core_expr * core_type, string) result =
     fun lvl ctx e ->
