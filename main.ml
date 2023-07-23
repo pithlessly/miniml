@@ -859,6 +859,16 @@ let elab (ast : ast) : (core, string) result =
                e2'),
         ground ty_e2
       )
+    | Fun (PVar s :: [], e) ->
+      (* TODO: pick name lazily *)
+      let uv = new_uvar lvl (Some ("(type of " ^ s ^ ")")) () in
+      let ty_arg = CUVar uv in
+      let v = Var (s, next_var_id (), [], ty_arg) in
+      infer lvl (v :: ctx) e >>= fun (e', ty_res) ->
+      Ok (
+        Fun (PVar v :: [], e'),
+        CCon ("->", ty_arg :: ty_res :: [])
+      )
   in
   let rec go ctx acc decls =
     match decls with
