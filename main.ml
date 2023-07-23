@@ -821,6 +821,21 @@ let elab (ast : ast) : (core, string) result =
       let (qvars, ty) = go ([], ty) in
       (qvars, ty)
   in
+  let instantiate lvl (qvars : core_qvar list) : core_type -> core_type =
+    let qvars = List.map (fun var -> (var, new_uvar lvl None ())) qvars in
+    let rec go ty : core_type = match ty with
+                    | CQVar (QVar (n, id)) -> (
+                      match List.find_opt (fun (QVar (_, id'), _) -> id = id') qvars with
+                      | None -> CUVar (new_uvar lvl (
+                                  Some ("<error: unexpected QVar here: " ^ n ^ ">")) ())
+                      | Some (_, uv) -> CUVar uv)
+                    | CUVar r -> (
+                      match deref r with
+                      | Known ty -> go ty
+                      | Unknown _ -> ty)
+                    | CCon (s, tys) -> CCon (s, List.map go tys)
+    in go
+  in
   let rec infer : core_level -> ctx -> ast_expr -> (core_expr * core_type, string) result =
     fun lvl ctx e ->
     match e with
@@ -840,7 +855,9 @@ let elab (ast : ast) : (core, string) result =
                 | None -> Error ("variable not in scope: " ^ s)
                 | Some v ->
                   match v with
-                  | Var (_, _, [], ty) -> Ok (Var v, ty)
+                  | Var (_, _, qvars, ty) ->
+                    let ty = instantiate lvl qvars ty in
+                    Ok (Var v, ty)
                   | _ -> invalid_arg "TODO: support instantiation")
     | App (e1, e2) ->
       infer lvl ctx e1 >>= fun (e1', ty_fun) ->
