@@ -770,7 +770,7 @@ let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
     (* r must be Unknown *)
     occurs_check r t' >>= (fun () -> Ok (r := Known t'))
   | (CCon (c1, p1), CCon (c2, p2)) ->
-    if c1 != c2 then Error ("cannot unify different type constructors: " ^ c1 ^ " != " ^ c2)
+    if c1 <> c2 then Error ("cannot unify different type constructors: " ^ c1 ^ " != " ^ c2)
     else unify_all p1 p2
 and unify_all : core_type list -> core_type list -> (unit, string) result = fun ts1 ts2 ->
   match (ts1, ts2) with
