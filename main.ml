@@ -841,11 +841,11 @@ let elab (ast : ast) : (core, string) result =
     match pat with
     | PVar s ->
       (* TODO: pick name lazily *)
-      let ty = CUVar (new_uvar lvl (Some ("(type of " ^ s ^ ")")) ()) in
+      let ty = CUVar (new_uvar lvl (Some s) ()) in
       let v = Var (s, next_var_id (), [], ty) in
       Ok (v :: ctx, PVar v, ty)
     | PWild ->
-      let ty = CUVar (new_uvar lvl (Some "(type of _)") ()) in
+      let ty = CUVar (new_uvar lvl None ()) in
       Ok (ctx, PWild, ty)
     (* TODO: implement POr, PTuple, PList, PCon, PCharLit, PIntLit, PStrLit, PAsc *)
   and infer_pats lvl : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list, string) result =
@@ -894,12 +894,12 @@ let elab (ast : ast) : (core, string) result =
                e2'),
         ground ty_e2
       )
-    | Fun (pat :: [], e) ->
-      infer_pat lvl ctx pat >>= fun (ctx', pat', ty_arg) ->
+    | Fun (pats, e) ->
+      infer_pats lvl ctx pats >>= fun (ctx', pats') ->
       infer lvl ctx' e >>= fun (e', ty_res) ->
       Ok (
-        Fun (pat' :: [], e'),
-        CCon ("->", ty_arg :: ty_res :: [])
+        Fun (List.map fst pats', e'),
+        List.fold_right (fun (_, ty1) ty2 -> CCon ("->", ty1 :: ty2 :: [])) pats' ty_res
       )
   in
   let rec go ctx acc decls =
