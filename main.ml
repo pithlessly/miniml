@@ -779,8 +779,11 @@ and unify_all : core_type list -> core_type list -> (unit, string) result = fun 
   | _ -> Error "cannot unify different numbers of arguments"
 
 type ctx = core_var list
+let initial_ctx = []
 let lookup : string -> ctx -> core_var option =
   fun name -> List.find_opt (fun (Var (name', _, _, _)) -> name = name')
+let extend : ctx -> core_var -> ctx =
+  fun ctx v -> v :: ctx
 
 let elab (ast : ast) : (core, string) result =
   let next_var_id = counter () in
@@ -840,10 +843,9 @@ let elab (ast : ast) : (core, string) result =
     fun ctx pat ->
     match pat with
     | PVar s ->
-      (* TODO: pick name lazily *)
       let ty = CUVar (new_uvar lvl (Some s) ()) in
       let v = Var (s, next_var_id (), [], ty) in
-      Ok (v :: ctx, PVar v, ty)
+      Ok (extend ctx v, PVar v, ty)
     | PWild ->
       let ty = CUVar (new_uvar lvl None ()) in
       Ok (ctx, PWild, ty)
@@ -888,7 +890,7 @@ let elab (ast : ast) : (core, string) result =
       infer (lvl + 1) ctx e1 >>= fun (e1', ty_e1) ->
       let scheme = generalize lvl ty_e1 in
       let v = Var (s, next_var_id (), fst scheme, snd scheme) in
-      infer lvl (v :: ctx) e2 >>= fun (e2', ty_e2) ->
+      infer lvl (extend ctx v) e2 >>= fun (e2', ty_e2) ->
       Ok (
         LetIn (Bindings (false, ((PVar v, [], None, e1') :: [])),
                e2'),
@@ -908,13 +910,13 @@ let elab (ast : ast) : (core, string) result =
     | Let (Bindings (false, ((PVar name, [], None, e) :: []))) :: decls ->
       infer 0 ctx e >>= fun (e', t) ->
         let v = Var (name, next_var_id (), [], t) in
-        go (v :: ctx)
+        go (extend ctx v)
            (Let (Bindings (false, ((PVar v, [], (* TODO: use types to ensure Core has no annotations? *)
                                              None, e') :: []))
                 ) :: acc)
            decls
     | _ :: _ -> Error "this type of binding is not yet supported"
-  in go [] [] ast
+  in go initial_ctx [] ast
 
 let text =
   let f = In_channel.open_text "scratchpad.mini-ml" in
