@@ -841,7 +841,7 @@ let elab (ast : ast) : (core, string) result =
   in
   let instantiate lvl (qvars : core_qvar list) : core_type -> core_type =
     let qvars = List.map (fun var -> (var, new_uvar lvl None ())) qvars in
-    let rec go ty : core_type = match ty with
+    let rec go ty = match ty with
                     | CQVar (QVar (n, id)) -> (
                       match List.find_opt (fun (QVar (_, id'), _) -> id = id') qvars with
                       | None -> CUVar (new_uvar lvl (
