@@ -606,7 +606,6 @@ let parse: token list -> (ast, string) result =
            we would incorrectly parse something like `A ((1, 2))` as a
            two-argument constructor since parens are transparent to the
            AST."
-
            Well, as it turns out, the real OCaml parser does the same hack ;)
            *)
         match constructor_args_opt with
@@ -694,7 +693,7 @@ type core_type = | CQVar of core_qvar
                  | CUVar of core_uvar ref
                  | CCon  of string * core_type list
 and  core_uvar = | Unknown of string * core_var_id * core_level
-                 | Known of core_type
+                 | Known   of core_type
 type core_ctx = (string * core_type) list
 type core_var  = | Var of string (* name in the syntax *)
                         * core_var_id (* numeric ID *)
