@@ -708,10 +708,34 @@ type core_typ_decl = (core_var, unit) typ_decl
 type core_decl = (core_var, unit) decl
 type core = core_decl list
 
-(* some helpers for reference operations *)
+(* some helpers *)
+let map_m
+  ((pure  : 'b list -> 'b_list_m),
+   ((>>=) : 'b_m -> ('b -> 'b_list_m) -> 'b_list_m))
+  (f : 'a -> 'b_m)
+  : 'a list -> 'b_list_m =
+  let rec go ys xs =
+    match xs with
+    | [] -> pure (List.rev ys)
+    | x :: xs -> f x >>= fun y -> go (y :: ys) xs
+  in go []
+
+let state_monad =
+  let pure a    = (fun s -> (s, a))
+  and (>>=) g f = (fun s -> let (s, a) = g s in f a s)
+  in (pure, (>>=))
+let error_monad =
+  let pure a    = Ok a
+  and (>>=) x f = match x with | Error e -> Error e | Ok a -> f a
+  in (pure, (>>=))
+let error_state_monad =
+  let pure a    = (fun s -> Ok (s, a))
+  and (>>=) g f = (fun s -> match g s with | Error e -> Error e | Ok (s, a) -> f a s)
+  in (pure, (>>=))
+
 let deref = (!)
-let (=<<) f x = match x with | Ok a -> f a | Error e -> Error e
-let (>>=) x f = (=<<) f x
+let (>>=) x f = snd error_monad x f
+let (=<<) f x = (>>=) x f
 let counter () =
   let i = ref 0 in
   (fun () ->
@@ -796,15 +820,15 @@ let elab (ast : ast) : (core, string) result =
     in ref (Unknown (name, id, lvl))
   in
   let generalize (lvl : core_level) : core_type -> core_qvar list * core_type =
-    let rec go (qvars, ty) =
+    let rec go ty qvars =
       match ty with
       | CQVar qv -> (qvars, ty)
       | CCon (c, tys) ->
-        let (qvars, tys) = go_all [] qvars tys in
+        let (qvars, tys) = map_m state_monad go tys qvars in
         (qvars, (CCon (c, tys)))
       | CUVar r ->
         match deref r with
-        | Known ty -> go (qvars, ty)
+        | Known ty -> go ty qvars
         | Unknown (name, id, lvl') ->
           if lvl' > lvl then
             let qv = QVar (name, next_var_id ()) in
@@ -813,15 +837,7 @@ let elab (ast : ast) : (core, string) result =
             (qvars, CQVar qv)
           else
             (qvars, ty)
-    and go_all acc qvars tys =
-      match tys with
-      | [] -> (qvars, List.rev acc)
-      | ty :: tys ->
-        let (qvars, ty) = go (qvars, ty) in
-        go_all (ty :: acc) qvars tys
-    in fun ty ->
-      let (qvars, ty) = go ([], ty) in
-      (qvars, ty)
+    in fun ty -> go ty []
   in
   let instantiate lvl (qvars : core_qvar list) : core_type -> core_type =
     let qvars = List.map (fun var -> (var, new_uvar lvl None ())) qvars in
@@ -838,36 +854,27 @@ let elab (ast : ast) : (core, string) result =
                     | CCon (s, tys) -> CCon (s, List.map go tys)
     in go
   in
-  let rec infer_pat lvl : ctx -> ast_pat -> (ctx * core_pat * core_type, string) result =
+  let rec infer_pat lvl : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
     fun ctx pat ->
     match pat with
     | PVar s ->
       let ty = CUVar (new_uvar lvl (Some s) ()) in
       let v = Var (s, next_var_id (), [], ty) in
-      Ok (extend ctx v, PVar v, ty)
+      Ok (extend ctx v, (PVar v, ty))
     | PWild ->
       let ty = CUVar (new_uvar lvl None ()) in
-      Ok (ctx, PWild, ty)
+      Ok (ctx, (PWild, ty))
     (* TODO: implement POr, PTuple, PList, PCon, PCharLit, PIntLit, PStrLit, PAsc *)
   and infer_pats lvl : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list, string) result =
-    let rec go acc ctx pats = match pats with
-                              | []          -> Ok (ctx, List.rev acc)
-                              | pat :: pats -> infer_pat lvl ctx pat >>= fun (ctx, pat, ty) ->
-                                               go ((pat, ty) :: acc) ctx pats
-    in go []
+    Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl)))
   in
-  let rec infer : core_level -> ctx -> ast_expr -> (core_expr * core_type, string) result =
-    fun lvl ctx e ->
+  let rec infer lvl : ctx -> ast_expr -> (core_expr * core_type, string) result =
+    fun ctx e ->
     match e with
     | Tuple es ->
-      (* TODO: write mapM *)
-      let rec go es acc =
-        match es with
-        | []      -> Ok (List.rev acc)
-        | e :: es -> infer lvl ctx e >>= (fun (e', t) -> go es ((e', t) :: acc))
-      in
-      go es [] >>= (fun elab -> Ok (Tuple (List.map fst elab),
-                                    CCon ("*", List.map snd elab)))
+      map_m error_monad (infer lvl ctx) es >>= fun elab ->
+        Ok (Tuple (List.map fst elab),
+            CCon ("*", List.map snd elab))
     | CharLit c -> Ok (CharLit c, CCon ("char", []))
     | IntLit i -> Ok (IntLit i, CCon ("int", []))
     | StrLit s -> Ok (StrLit s, CCon ("string", []))
