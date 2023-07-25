@@ -802,7 +802,7 @@ and unify_all : core_type list -> core_type list -> (unit, string) result = fun 
   | _ -> Error "cannot unify different numbers of arguments"
 
 type ctx = core_var list
-let initial_ctx = []
+let empty_ctx = []
 let lookup : string -> ctx -> core_var option =
   fun name -> List.find_opt (fun (Var (name', _, _, _)) -> name = name')
 let extend : ctx -> core_var -> ctx =
@@ -892,16 +892,10 @@ let elab (ast : ast) : (core, string) result =
       let ty_res = CUVar uv in
       unify ty_fun (CCon ("->", (ty_arg :: ty_res :: []))) >>= fun () ->
       Ok (App (e1', e2'), ground ty_res)
-    | LetIn (Bindings (false, ((PVar s, [], None, e1) :: [])), e2) ->
-      infer (lvl + 1) ctx e1 >>= fun (e1', ty_e1) ->
-      let scheme = generalize lvl ty_e1 in
-      let v = Var (s, next_var_id (), fst scheme, snd scheme) in
-      infer lvl (extend ctx v) e2 >>= fun (e2', ty_e2) ->
-      Ok (
-        LetIn (Bindings (false, ((PVar v, [], None, e1') :: [])),
-               e2'),
-        ground ty_e2
-      )
+    | LetIn (bindings, e) ->
+      infer_bindings lvl ctx bindings >>= fun (ctx', bindings') ->
+      infer lvl ctx' e >>= fun (e', ty_e) ->
+      Ok (LetIn (bindings', e'), ground ty_e)
     | Fun (pats, e) ->
       infer_pats lvl ctx pats >>= fun (ctx', pats') ->
       infer lvl ctx' e >>= fun (e', ty_res) ->
@@ -909,20 +903,47 @@ let elab (ast : ast) : (core, string) result =
         Fun (List.map fst pats', e'),
         List.fold_right (fun (_, ty1) ty2 -> CCon ("->", ty1 :: ty2 :: [])) pats' ty_res
       )
+  and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings, string) result =
+    fun ctx bindings ->
+    match bindings with
+    | Bindings (true,  _)        -> Error "TODO: handle recursive bindings"
+    | Bindings (false, bindings) ->
+      map_m error_state_monad
+            (fun (head, args, annot, rhs) ctx ->
+              match annot with
+              | Some _ -> Error "TODO: handle type annotations"
+              | None ->
+                infer_pat  lvl       ctx       head >>= fun (ctx_after, (head', ty_head)) ->
+                infer_pats (lvl + 1) ctx       args >>= fun (ctx_inner, pats') ->
+                infer      (lvl + 1) ctx_inner rhs  >>= fun (rhs', ty_rhs) ->
+                unify ty_head (List.fold_right
+                                (fun (_, ty1) ty2 -> CCon ("->", ty1 :: ty2 :: []))
+                                pats' ty_rhs)
+                >>= fun () ->
+                (* FIXME: right now we are only generalizing when the head is a variable.
+                   FIXME: we don't implement the value restriction, so this is unsound. *)
+                let (head', ctx_after) =
+                  match head with
+                  | PVar s ->
+                    (* TODO: generating a new variable and discarding the old ctx_after is janky *)
+                    let scheme = generalize lvl ty_head in
+                    let v = Var (s, next_var_id (), fst scheme, snd scheme) in
+                    (PVar v, extend ctx v)
+                  | _ ->
+                    (head', ctx_after)
+                in
+                Ok (ctx_after, (head', List.map fst pats', None, rhs'))
+            ) bindings ctx
+      >>= fun (ctx, bindings) -> Ok (ctx, Bindings (false, bindings))
   in
-  let rec go ctx acc decls =
-    match decls with
-    | [] -> Ok (List.rev acc)
-    | Let (Bindings (false, ((PVar name, [], None, e) :: []))) :: decls ->
-      infer 0 ctx e >>= fun (e', t) ->
-        let v = Var (name, next_var_id (), [], t) in
-        go (extend ctx v)
-           (Let (Bindings (false, ((PVar v, [], (* TODO: use types to ensure Core has no annotations? *)
-                                             None, e') :: []))
-                ) :: acc)
-           decls
-    | _ :: _ -> Error "this type of binding is not yet supported"
-  in go initial_ctx [] ast
+  map_m error_state_monad
+        (fun decl ctx ->
+          match decl with
+          | Let bindings -> infer_bindings (* lvl = *) 0 ctx bindings
+                            >>= fun (ctx, bindings') -> Ok (ctx, Let bindings')
+          | _            -> Error "TODO: this type of binding is not yet supported"
+        ) ast empty_ctx
+  >>= fun (_, ast') -> Ok ast'
 
 let text =
   let f = In_channel.open_text "scratchpad.mini-ml" in
