@@ -808,6 +808,27 @@ let lookup : string -> ctx -> core_var option =
 let extend : ctx -> core_var -> ctx =
   fun ctx v -> v :: ctx
 
+let initial_ctx (next_var_id : unit -> core_var_id) =
+  let (-->) t1 t2 = CCon ("->", (t1 :: t2 :: [])) in
+  let t_int  = CCon ("int",  []) in
+  let t_bool = CCon ("bool", []) in
+  (* it's okay to reuse QVars for multiple variables here -
+     they have the same ID, but this is only used to distinguish
+     them during instantiation *)
+  let a = QVar ("a", next_var_id ()) in
+  let qa = a :: [] in
+  let a = CQVar a in
+  let rec ctx = ref empty_ctx in
+  let rec add name qvars ty =
+    ctx := extend (deref ctx) (Var (name, next_var_id (), qvars, ty))
+  in (
+    add "&&" [] (t_bool --> (t_bool --> t_bool));
+    add "||" [] (t_bool --> (t_bool --> t_bool));
+    add "<=" qa (a --> (a --> t_bool));
+    add "="  qa (a --> (a --> t_bool));
+    deref ctx
+  )
+
 let elab (ast : ast) : (core, string) result =
   let next_var_id = counter () in
   let next_uvar_name = counter () in
@@ -942,7 +963,7 @@ let elab (ast : ast) : (core, string) result =
           | Let bindings -> infer_bindings (* lvl = *) 0 ctx bindings
                             >>= fun (ctx, bindings') -> Ok (ctx, Let bindings')
           | _            -> Error "TODO: this type of binding is not yet supported"
-        ) ast empty_ctx
+        ) ast (initial_ctx next_var_id)
   >>= fun (_, ast') -> Ok ast'
 
 let text =
