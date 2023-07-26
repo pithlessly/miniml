@@ -743,6 +743,64 @@ let counter () =
     i := 1 + v;
     v)
 
+type 'a string_map = int * (string * 'a) list
+(* TODO: replace with a more efficient implementation *)
+let map_empty : 'a string_map = (0, [])
+let map_singleton : (string * 'a) -> 'a string_map =
+  fun entry -> (1, entry :: [])
+let map_lookup k : 'a string_map -> 'a option =
+  fun (_, map) -> Option.map snd (List.find_opt (fun (k', _) -> k = k') map)
+let map_eql (elem_eql : 'a -> 'a -> bool) : 'a string_map -> 'a string_map -> bool =
+  fun (n1, m1) (n2, m2) ->
+    if n1 <> n2 then false else
+    let rec go m1 m2 =
+      match (m1, m2) with
+      | ([], []) -> true
+      | ([], _) -> invalid_arg "impossible - maps have different sizes"
+      | ((k, v) :: m1, m2) ->
+        let rec remove_key acc m2 =
+          match m2 with
+          | []             -> false (* k not present in m2 *)
+          | (k', v') :: m2 ->
+            if k <> k' then
+              remove_key ((k', v') :: acc) m2
+            else
+              if not (elem_eql v v') then false else
+              let m2 = List.fold_left (fun m2 pair -> pair :: m2) m2 acc in
+              go m1 m2
+        in remove_key [] m2
+    in go m1 m2
+let map_insert (k, v) : 'a string_map -> 'a string_map option =
+  fun (n, m) -> match List.find_opt (fun (k', _) -> k = k') m with
+                | None   -> Some (n + 1, (k, v) :: m)
+                | Some _ -> None
+type dup_err = | DupErr of string
+let map_disjoint_union
+  : 'a string_map -> 'a string_map -> ('a string_map, dup_err) result
+  = fun map1 map2 ->
+    (* sort by size *)
+    let ((n1, m1), (n2, m2)) =
+      let (n1, _) = map1 in
+      let (n2, _) = map2 in
+      if n1 < n2 then (map1, map2) else (map2, map1)
+    in
+    let rec go m1 acc =
+      match m1 with
+      | [] -> Ok (n1 + n2, acc)
+      | (k, v) :: m1 ->
+        match map_lookup k map2 with
+        | Some _ -> Error (DupErr k)
+        | None   -> go m1 ((k, v) :: acc)
+    in go m1 m2
+let map_map (f : string -> 'a -> 'b) : 'a string_map -> 'b string_map =
+  fun (n, m) -> (n, List.map (fun (k, v) -> (k, f k v)) m)
+(* hopefully the order is irrelevant *)
+let map_fold_left (f : 'a -> (string * 'b) -> 'a) : 'a -> 'b string_map -> 'a =
+  let rec go acc m = (match m with
+                      | [] -> acc
+                      | kv :: m -> go (f acc kv) m)
+  in fun init (_, m) -> go init m
+
 let rec occurs_check : core_uvar ref -> core_type -> (unit, string) result = fun v ty ->
   match ty with
   | CQVar _ -> Ok ()
@@ -875,18 +933,69 @@ let elab (ast : ast) : (core, string) result =
                     | CCon (s, tys) -> CCon (s, List.map go tys)
     in go
   in
-  let rec infer_pat lvl : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
+  let infer_pat lvl : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
+    (* Elaboration of patterns requires two phases. Originally we just traversed the pattern
+       and added every variable we found to the context, with a new uvar for its type.
+       The reason this doesn't work is because of 'or'-patterns, which require:
+       (1) the set of variables bound in both branches be the same;
+       (2) the resulting context contain only one copy of the variables;
+       (3) each copy of a variable in the elaborated branches refer to the same var ID.
+       So instead, elaboration proceeds in three steps:
+       - traverse the pattern to determine the names of all bound variables
+         (and checking consistency between branches);
+       - create a new Var (with ids and new uvars for types) for each bound variable;
+       - traverse the pattern again, translating each identifier to its corresponding Var.
+       *)
+    let bound_vars : ast_pat -> (unit string_map, string) result =
+      let rec go pat =
+        match pat with
+        | POr (p1, p2) -> go p1 >>= fun v1 ->
+                          go p2 >>= fun v2 ->
+                          if map_eql (fun () () -> true) v1 v2 then Ok v1
+                          else Error "branches do not bind the same variables"
+        | PTuple ps    -> go_list ps
+        | PList ps     -> go_list ps
+        | PCon (_, ps) -> (match ps with | Some ps -> go_list ps
+                                         | None    -> Ok map_empty)
+        | PCharLit _ | PIntLit _ | PStrLit _
+        | PWild        -> Ok map_empty
+        | PVar v       -> Ok (map_singleton (v, ()))
+        | PAsc (p, _)  -> go p
+      and go_list pats =
+        List.fold_left merge (Ok map_empty) (List.map go pats)
+      and merge ev1 ev2 =
+        ev1 >>= fun v1 ->
+        ev2 >>= fun v2 ->
+        match map_disjoint_union v1 v2 with
+        | Ok v' -> Ok v'
+        | Error (DupErr v) -> Error "variable bound multiple times in the same pattern: v"
+      in go
+    in
     fun ctx pat ->
-    match pat with
-    | PVar s ->
-      let ty = CUVar (new_uvar lvl (Some s) ()) in
-      let v = Var (s, next_var_id (), [], ty) in
-      Ok (extend ctx v, (PVar v, ty))
-    | PWild ->
-      let ty = CUVar (new_uvar lvl None ()) in
-      Ok (ctx, (PWild, ty))
-    (* TODO: implement POr, PTuple, PList, PCon, PCharLit, PIntLit, PStrLit, PAsc *)
-  and infer_pats lvl : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list, string) result =
+    bound_vars pat >>= fun bindings ->
+    let bindings = map_map (fun s () -> let uv = CUVar (new_uvar lvl (Some s) ()) in
+                                        Var (s, next_var_id (), [], uv)) bindings
+    in
+    let ctx' = map_fold_left (fun ctx (_, v) -> extend ctx v) ctx bindings in
+    let rec go pat =
+      match pat with
+      | POr (p1, p2) -> go p1         >>= fun (p1', ty1) ->
+                        go p2         >>= fun (p2', ty2) ->
+                        unify ty1 ty2 >>= fun () ->
+                        Ok (POr (p1', p2'), ty1)
+      | PCharLit c   -> Ok (PCharLit c, CCon ("char", []))
+      | PIntLit c    -> Ok (PIntLit c, CCon ("int", []))
+      | PStrLit c    -> Ok (PStrLit c, CCon ("string", []))
+      | PVar s       -> (match map_lookup s bindings with
+                         | None   -> Error "impossible: we should have created suitable bindings?"
+                         | Some v -> let Var (_, _, _, ty) = v in
+                                     Ok (PVar v, ty))
+      | PWild        -> let ty = CUVar (new_uvar lvl None ()) in
+                        Ok (PWild, ty)
+      (* TODO: implement PTuple, PList, PCon, PAsc *)
+    in go pat >>= fun pat' -> Ok (ctx', pat')
+  in
+  let infer_pats lvl : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list, string) result =
     Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl)))
   in
   let rec infer lvl : ctx -> ast_expr -> (core_expr * core_type, string) result =
