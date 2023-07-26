@@ -958,7 +958,7 @@ let elab (ast : ast) : (core, string) result =
             (qvars, ty)
     in fun ty -> go ty []
   in
-  let instantiate lvl (qvars : core_qvar list) : core_type -> core_type =
+  let instantiate lvl (qvars : core_qvar list) () : core_type -> core_type =
     let qvars = List.map (fun var -> (var, new_uvar lvl None ())) qvars in
     let rec go ty = match ty with
                     | CQVar (QVar (n, id)) -> (
@@ -1051,10 +1051,9 @@ let elab (ast : ast) : (core, string) result =
     | Var s -> (match lookup s ctx with
                 | None -> Error ("variable not in scope: " ^ s)
                 | Some v ->
-                  match v with
-                  | Binding (_, _, qvars, ty) ->
-                    let ty = instantiate lvl qvars ty in
-                    Ok (Var v, ty))
+                  let Binding (_, _, qvars, ty) = v in
+                  let ty = instantiate lvl qvars () ty in
+                  Ok (Var v, ty))
     | LetOpen (Module name, e) -> (
       match extend_open ctx name with
       | Some ctx -> infer lvl ctx e
