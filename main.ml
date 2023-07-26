@@ -877,19 +877,27 @@ and unify_all : core_type list -> core_type list -> (unit, string) result = fun 
   | _ -> Error "cannot unify different numbers of arguments"
 
 type ctx = Ctx of core_var list       (* variables *)
+                * core_cvar list      (* constructors *)
                 * (string * ctx) list (* modules *)
-let empty_ctx = Ctx ([], [])
+let empty_ctx = Ctx ([], [], [])
 let lookup : string -> ctx -> core_var option =
-  fun name (Ctx (vars, _)) -> List.find_opt (fun (Binding (name', _, _, _)) -> name = name') vars
+  fun name (Ctx (vars, _, _)) ->
+    List.find_opt (fun (Binding (name', _, _, _)) -> name = name') vars
+let lookup_con : string -> ctx -> core_cvar option =
+  fun name (Ctx (_, cvars, _)) ->
+    List.find_opt (fun (CBinding (name', _, _, _, _)) -> name = name') cvars
 let extend : ctx -> core_var -> ctx =
-  fun (Ctx (vars, modules)) v -> Ctx (v :: vars, modules)
+  fun (Ctx (vars, cvars, modules)) v -> Ctx (v :: vars, cvars, modules)
+let extend_con : ctx -> core_cvar -> ctx =
+  fun (Ctx (vars, cvars, modules)) cv -> Ctx (vars, cv :: cvars, modules)
 let extend_mod : ctx -> (string * ctx) -> ctx =
-  fun (Ctx (vars, modules)) m -> Ctx (vars, m :: modules)
+  fun (Ctx (vars, cvars, modules)) m -> Ctx (vars, cvars, m :: modules)
 let extend_open : ctx -> string -> ctx option =
-  fun (Ctx (vars, modules)) name ->
+  fun (Ctx (vars, cvars, modules)) name ->
     match List.find_opt (fun (name', _) -> name = name') modules with
-    | None                            -> None
-    | Some (_, Ctx (vars', modules')) -> Some (Ctx (vars' @ vars, modules' @ modules))
+    | None -> None
+    | Some (_, Ctx (vars', cvars', modules')) ->
+      Some (Ctx (vars' @ vars, cvars' @ cvars, modules' @ modules))
 
 let initial_ctx (next_var_id : unit -> core_var_id) =
   let (-->) t1 t2 = CCon ("->", (t1 :: t2 :: [])) in
@@ -907,20 +915,22 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
     let add name qvars ty =
       ctx := extend (deref ctx) (Binding (name, next_var_id (), qvars, ty))
     in
+    let add_con name qvars params result =
+      ctx := extend_con (deref ctx) (CBinding (name, next_var_id (), qvars, params, result))
+    in
     let add_mod name m =
       ctx := extend_mod (deref ctx) (name, m)
     in
-    (callback add add_mod; deref ctx)
+    (callback add add_con add_mod; deref ctx)
   in
-  mk_ctx (fun add add_mod ->
+  mk_ctx (fun add add_con add_mod ->
     add "&&" [] (t_bool --> (t_bool --> t_bool));
     add "||" [] (t_bool --> (t_bool --> t_bool));
     add "<=" qa (a --> (a --> t_bool));
     add "="  qa (a --> (a --> t_bool));
-    (* TODO: make these constructors, not variables *)
-    add "true"  [] t_bool;
-    add "false" [] t_bool;
-    add_mod "String" (mk_ctx (fun add add_mod ->
+    add_con "true"  [] [] t_bool;
+    add_con "false" [] [] t_bool;
+    add_mod "String" (mk_ctx (fun add _ _ ->
       add "length" [] (t_string --> t_int);
       ()
     ));
