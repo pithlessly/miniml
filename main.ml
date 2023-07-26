@@ -1055,6 +1055,41 @@ let elab (ast : ast) : (core, string) result =
       map_m error_monad (infer lvl ctx) es >>= fun elab ->
         Ok (Tuple (List.map fst elab),
             CCon ("*", List.map snd elab))
+    | Con (name, args) -> (
+      match lookup_con name ctx with
+      | None -> Error ("constructor not in scope: " ^ name)
+      | Some cv ->
+        (* TODO: is there a way to deduplicate this logic between here and patterns? *)
+        match cv with
+        | CBinding (_, _, qvars, param_tys, result_tys) ->
+        let CBinding (_, _, qvars, param_tys, result_tys) = cv in
+        let instantiate = instantiate lvl qvars () in
+        let param_tys = List.map instantiate param_tys in
+        let result_ty = instantiate result_tys in
+        (* make sure we're applying the constructor to the right number of arguments.
+           as a special case, passing the "wrong" number of arguments to a 1-param
+           tuple, like `Some (1, 2)`, causes it to be treated as a tuple.
+        *)
+        (
+          match (param_tys, args) with
+          | ([], None)   -> Ok []
+          | ([], Some _) -> Error ("constructor " ^ name ^ " must be applied to 0 arguments")
+          | (_,  None)   -> Error ("constructor " ^ name ^ " must be applied to some arguments")
+          | (ty :: [], Some (args :: []))
+                         -> Ok (args :: [])
+          | (ty :: [], Some args)
+                         -> Ok (Tuple args :: [])
+          | (_,        Some args)
+                         -> if List.length param_tys = List.length args
+                            then Ok args
+                            else Error ("constructor " ^ name
+                                        ^ " is applied to the wrong number of arguments")
+        ) >>= fun args ->
+        map_m error_monad (infer lvl ctx) args >>= fun args' ->
+        unify_all param_tys (List.map snd args') >>= fun () ->
+        let args' = List.map fst args' in
+        Ok (Con (cv, Some args'), ground result_ty))
+        (* Ok (Con (cv, Some args'), ground result_ty)) *)
     | CharLit c -> Ok (CharLit c, CCon ("char", []))
     | IntLit i -> Ok (IntLit i, CCon ("int", []))
     | StrLit s -> Ok (StrLit s, CCon ("string", []))
