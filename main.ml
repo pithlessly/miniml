@@ -695,6 +695,7 @@ type core_type = | CQVar of core_qvar
 and  core_uvar = | Unknown of string * core_var_id * core_level
                  | Known   of core_type
 type core_ctx = (string * core_type) list
+(* TODO: rename to CtxVar so we don't have duplicate constructor names *)
 type core_var  = | Var of string (* name in the syntax *)
                         * core_var_id (* numeric ID *)
                         * core_qvar list (* forall parameters *)
@@ -859,32 +860,55 @@ and unify_all : core_type list -> core_type list -> (unit, string) result = fun 
   | (t1 :: ts1, t2 :: ts2) -> unify t1 t2 >>= (fun () -> unify_all ts1 ts2)
   | _ -> Error "cannot unify different numbers of arguments"
 
-type ctx = core_var list
-let empty_ctx = []
+type ctx = Ctx of core_var list       (* variables *)
+                * (string * ctx) list (* modules *)
+let empty_ctx = Ctx ([], [])
 let lookup : string -> ctx -> core_var option =
-  fun name -> List.find_opt (fun (Var (name', _, _, _)) -> name = name')
+  fun name (Ctx (vars, _)) -> List.find_opt (fun (Var (name', _, _, _)) -> name = name') vars
 let extend : ctx -> core_var -> ctx =
-  fun ctx v -> v :: ctx
+  fun (Ctx (vars, modules)) v -> Ctx (v :: vars, modules)
+let extend_mod : ctx -> (string * ctx) -> ctx =
+  fun (Ctx (vars, modules)) m -> Ctx (vars, m :: modules)
+let extend_open : ctx -> string -> ctx option =
+  fun (Ctx (vars, modules)) name ->
+    match List.find_opt (fun (name', _) -> name = name') modules with
+    | None                            -> None
+    | Some (_, Ctx (vars', modules')) -> Some (Ctx (vars' @ vars, modules' @ modules))
 
 let initial_ctx (next_var_id : unit -> core_var_id) =
   let (-->) t1 t2 = CCon ("->", (t1 :: t2 :: [])) in
-  let t_int  = CCon ("int",  []) in
-  let t_bool = CCon ("bool", []) in
+  let t_int    = CCon ("int",    []) in
+  let t_string = CCon ("string", []) in
+  let t_bool   = CCon ("bool",   []) in
   (* it's okay to reuse QVars for multiple variables here -
      they have the same ID, but this is only used to distinguish
      them during instantiation *)
   let a = QVar ("a", next_var_id ()) in
   let qa = a :: [] in
   let a = CQVar a in
-  let rec ctx = ref empty_ctx in
-  let rec add name qvars ty =
-    ctx := extend (deref ctx) (Var (name, next_var_id (), qvars, ty))
-  in (
+  let rec mk_ctx callback =
+    let ctx = ref empty_ctx in
+    let add name qvars ty =
+      ctx := extend (deref ctx) (Var (name, next_var_id (), qvars, ty))
+    in
+    let add_mod name m =
+      ctx := extend_mod (deref ctx) (name, m)
+    in
+    (callback add add_mod; deref ctx)
+  in
+  mk_ctx (fun add add_mod ->
     add "&&" [] (t_bool --> (t_bool --> t_bool));
     add "||" [] (t_bool --> (t_bool --> t_bool));
     add "<=" qa (a --> (a --> t_bool));
     add "="  qa (a --> (a --> t_bool));
-    deref ctx
+    (* TODO: make these constructors, not variables *)
+    add "true"  [] t_bool;
+    add "false" [] t_bool;
+    add_mod "String" (mk_ctx (fun add add_mod ->
+      add "length" [] (t_string --> t_int);
+      ()
+    ));
+    ()
   )
 
 let elab (ast : ast) : (core, string) result =
@@ -1015,6 +1039,10 @@ let elab (ast : ast) : (core, string) result =
                   | Var (_, _, qvars, ty) ->
                     let ty = instantiate lvl qvars ty in
                     Ok (Var v, ty))
+    | LetOpen (Module name, e) -> (
+      match extend_open ctx name with
+      | Some ctx -> infer lvl ctx e
+      | None     -> Error ("module not in scope: " ^ name))
     | App (e1, e2) ->
       infer lvl ctx e1 >>= fun (e1', ty_fun) ->
       infer lvl ctx e2 >>= fun (e2', ty_arg) ->
