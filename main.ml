@@ -1153,6 +1153,13 @@ let elab (ast : ast) : (core, string) result =
         Match (e_scrut', cases'),
         ground ty_res
       )
+    | IfThenElse (e1, e2, e3) ->
+      infer lvl ctx e1                  >>= fun (e1', ty_cond) ->
+      unify ty_cond (CCon ("bool", [])) >>= fun () ->
+      infer lvl ctx e2                  >>= fun (e2', ty_then) ->
+      infer lvl ctx e3                  >>= fun (e3', ty_else) ->
+      unify ty_then ty_else             >>= fun () ->
+      Ok (IfThenElse (e1', e2', e3'), ground ty_then)
     | Fun (pats, e) ->
       infer_pats lvl ctx pats >>= fun (ctx', pats') ->
       infer lvl ctx' e >>= fun (e', ty_res) ->
