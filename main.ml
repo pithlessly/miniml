@@ -694,12 +694,10 @@ type core_type = | CQVar of core_qvar
                  | CCon  of string * core_type list
 and  core_uvar = | Unknown of string * core_var_id * core_level
                  | Known   of core_type
-type core_ctx = (string * core_type) list
-(* TODO: rename to CtxVar so we don't have duplicate constructor names *)
-type core_var  = | Var of string (* name in the syntax *)
-                        * core_var_id (* numeric ID *)
-                        * core_qvar list (* forall parameters *)
-                        * core_type (* type *)
+type core_var  = | Binding of string (* name in the syntax *)
+                            * core_var_id (* numeric ID *)
+                            * core_qvar list (* forall parameters *)
+                            * core_type (* type *)
 
 type core_pat = (core_var, unit) pat
 type core_binding = (core_var, unit) binding
@@ -864,7 +862,7 @@ type ctx = Ctx of core_var list       (* variables *)
                 * (string * ctx) list (* modules *)
 let empty_ctx = Ctx ([], [])
 let lookup : string -> ctx -> core_var option =
-  fun name (Ctx (vars, _)) -> List.find_opt (fun (Var (name', _, _, _)) -> name = name') vars
+  fun name (Ctx (vars, _)) -> List.find_opt (fun (Binding (name', _, _, _)) -> name = name') vars
 let extend : ctx -> core_var -> ctx =
   fun (Ctx (vars, modules)) v -> Ctx (v :: vars, modules)
 let extend_mod : ctx -> (string * ctx) -> ctx =
@@ -889,7 +887,7 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
   let rec mk_ctx callback =
     let ctx = ref empty_ctx in
     let add name qvars ty =
-      ctx := extend (deref ctx) (Var (name, next_var_id (), qvars, ty))
+      ctx := extend (deref ctx) (Binding (name, next_var_id (), qvars, ty))
     in
     let add_mod name m =
       ctx := extend_mod (deref ctx) (name, m)
@@ -998,7 +996,7 @@ let elab (ast : ast) : (core, string) result =
     fun ctx pat ->
     bound_vars pat >>= fun bindings ->
     let bindings = map_map (fun s () -> let uv = CUVar (new_uvar lvl (Some s) ()) in
-                                        Var (s, next_var_id (), [], uv)) bindings
+                                        Binding (s, next_var_id (), [], uv)) bindings
     in
     let ctx' = map_fold_left (fun ctx (_, v) -> extend ctx v) ctx bindings in
     let rec go pat =
@@ -1012,7 +1010,7 @@ let elab (ast : ast) : (core, string) result =
       | PStrLit c    -> Ok (PStrLit c, CCon ("string", []))
       | PVar s       -> (match map_lookup s bindings with
                          | None   -> Error "impossible: we should have created suitable bindings?"
-                         | Some v -> let Var (_, _, _, ty) = v in
+                         | Some v -> let Binding (_, _, _, ty) = v in
                                      Ok (PVar v, ty))
       | PWild        -> let ty = CUVar (new_uvar lvl None ()) in
                         Ok (PWild, ty)
@@ -1036,7 +1034,7 @@ let elab (ast : ast) : (core, string) result =
                 | None -> Error ("variable not in scope: " ^ s)
                 | Some v ->
                   match v with
-                  | Var (_, _, qvars, ty) ->
+                  | Binding (_, _, qvars, ty) ->
                     let ty = instantiate lvl qvars ty in
                     Ok (Var v, ty))
     | LetOpen (Module name, e) -> (
@@ -1101,7 +1099,7 @@ let elab (ast : ast) : (core, string) result =
                   | PVar s ->
                     (* TODO: generating a new variable and discarding the old ctx_after is janky *)
                     let scheme = generalize lvl ty_head in
-                    let v = Var (s, next_var_id (), fst scheme, snd scheme) in
+                    let v = Binding (s, next_var_id (), fst scheme, snd scheme) in
                     (PVar v, extend ctx v)
                   | _ ->
                     (head', ctx_after)
