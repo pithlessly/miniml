@@ -1026,6 +1026,22 @@ let elab (ast : ast) : (core, string) result =
       infer_bindings lvl ctx bindings >>= fun (ctx', bindings') ->
       infer lvl ctx' e >>= fun (e', ty_e) ->
       Ok (LetIn (bindings', e'), ground ty_e)
+    | Match (e_scrut, cases) ->
+      let ty_res = CUVar (new_uvar lvl None ()) in
+      infer lvl ctx e_scrut >>= fun (e_scrut', ty_scrut) ->
+      map_m error_monad
+            (fun (pat, e) ->
+              infer_pat lvl ctx pat >>= fun (ctx', (pat', ty_pat)) ->
+              unify ty_pat ty_scrut >>= fun () ->
+              infer lvl ctx' e      >>= fun (e', ty_e) ->
+              unify ty_e ty_res     >>= fun () ->
+              Ok (pat', e'))
+            cases
+      >>= fun cases' ->
+      Ok (
+        Match (e_scrut', cases'),
+        ground ty_res
+      )
     | Fun (pats, e) ->
       infer_pats lvl ctx pats >>= fun (ctx', pats') ->
       infer lvl ctx' e >>= fun (e', ty_res) ->
