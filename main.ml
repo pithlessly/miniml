@@ -937,6 +937,38 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
     ()
   )
 
+let preprocess_constructor_args
+  (instantiate : core_qvar list -> unit -> core_type -> core_type)
+  (mk_tuple : 'a list -> 'a) ctx name (args : 'a list option)
+  : (core_cvar * core_type list * core_type * 'a list, string) result =
+  (
+    match lookup_con name ctx with
+    | None    -> Error ("constructor not in scope: " ^ name)
+    | Some cv -> Ok cv
+  ) >>= fun cv ->
+  let CBinding (_, _, qvars, param_tys, result_tys) = cv in
+  let instantiate = instantiate qvars () in
+  let param_tys = List.map instantiate param_tys in
+  let result_ty = instantiate result_tys in
+  (* make sure we're applying the constructor to the right number of arguments.
+     as a special case, passing the "wrong" number of arguments to a 1-param
+     tuple, like `Some (1, 2)`, causes it to be treated as a tuple.
+  *)
+  (
+    let num_params = List.length param_tys in
+    match (num_params, args) with
+    | (0, None)              -> Ok []
+    | (0, Some _)            -> Error ("constructor " ^ name ^ " must be applied to 0 arguments")
+    | (_, None)              -> Error ("constructor " ^ name ^ " must be applied to some arguments")
+    | (1, Some (args :: [])) -> Ok (args :: [])
+    | (1, Some args)         -> Ok (mk_tuple args :: [])
+    | (_, Some args)         -> if num_params = List.length args
+                                then Ok args
+                                else Error ("constructor " ^ name
+                                            ^ " is applied to the wrong number of arguments")
+  ) >>= fun args ->
+  Ok (cv, param_tys, result_ty, args)
+
 let elab (ast : ast) : (core, string) result =
   let next_var_id = counter () in
   let next_uvar_name = counter () in
@@ -1034,6 +1066,14 @@ let elab (ast : ast) : (core, string) result =
                         go p2         >>= fun (p2', ty2) ->
                         unify ty1 ty2 >>= fun () ->
                         Ok (POr (p1', p2'), ty1)
+      | PCon (name, args) ->
+        preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
+                                    ctx name args
+        >>= fun (cv, param_tys, result_ty, args) ->
+        map_m error_monad go args >>= fun args' ->
+        unify_all param_tys (List.map snd args') >>= fun () ->
+        let args' = List.map fst args' in
+        Ok (PCon (cv, Some args'), ground result_ty)
       | PCharLit c   -> Ok (PCharLit c, CCon ("char", []))
       | PIntLit c    -> Ok (PIntLit c, CCon ("int", []))
       | PStrLit c    -> Ok (PStrLit c, CCon ("string", []))
@@ -1043,7 +1083,7 @@ let elab (ast : ast) : (core, string) result =
                                      Ok (PVar v, ty))
       | PWild        -> let ty = CUVar (new_uvar lvl None ()) in
                         Ok (PWild, ty)
-      (* TODO: implement PTuple, PList, PCon, PAsc *)
+      (* TODO: implement PTuple, PList, PAsc *)
     in go pat >>= fun pat' -> Ok (ctx', pat')
   in
   let infer_pats lvl : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list, string) result =
@@ -1056,41 +1096,14 @@ let elab (ast : ast) : (core, string) result =
       map_m error_monad (infer lvl ctx) es >>= fun elab ->
         Ok (Tuple (List.map fst elab),
             CCon ("*", List.map snd elab))
-    | Con (name, args) -> (
-      match lookup_con name ctx with
-      | None -> Error ("constructor not in scope: " ^ name)
-      | Some cv ->
-        (* TODO: is there a way to deduplicate this logic between here and patterns? *)
-        match cv with
-        | CBinding (_, _, qvars, param_tys, result_tys) ->
-        let CBinding (_, _, qvars, param_tys, result_tys) = cv in
-        let instantiate = instantiate lvl qvars () in
-        let param_tys = List.map instantiate param_tys in
-        let result_ty = instantiate result_tys in
-        (* make sure we're applying the constructor to the right number of arguments.
-           as a special case, passing the "wrong" number of arguments to a 1-param
-           tuple, like `Some (1, 2)`, causes it to be treated as a tuple.
-        *)
-        (
-          match (param_tys, args) with
-          | ([], None)   -> Ok []
-          | ([], Some _) -> Error ("constructor " ^ name ^ " must be applied to 0 arguments")
-          | (_,  None)   -> Error ("constructor " ^ name ^ " must be applied to some arguments")
-          | (ty :: [], Some (args :: []))
-                         -> Ok (args :: [])
-          | (ty :: [], Some args)
-                         -> Ok (Tuple args :: [])
-          | (_,        Some args)
-                         -> if List.length param_tys = List.length args
-                            then Ok args
-                            else Error ("constructor " ^ name
-                                        ^ " is applied to the wrong number of arguments")
-        ) >>= fun args ->
-        map_m error_monad (infer lvl ctx) args >>= fun args' ->
-        unify_all param_tys (List.map snd args') >>= fun () ->
-        let args' = List.map fst args' in
-        Ok (Con (cv, Some args'), ground result_ty))
-        (* Ok (Con (cv, Some args'), ground result_ty)) *)
+    | Con (name, args) ->
+      preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
+                                  ctx name args
+      >>= fun (cv, param_tys, result_ty, args) ->
+      map_m error_monad (infer lvl ctx) args >>= fun args' ->
+      unify_all param_tys (List.map snd args') >>= fun () ->
+      let args' = List.map fst args' in
+      Ok (Con (cv, Some args'), ground result_ty)
     | CharLit c -> Ok (CharLit c, CCon ("char", []))
     | IntLit i -> Ok (IntLit i, CCon ("int", []))
     | StrLit s -> Ok (StrLit s, CCon ("string", []))
