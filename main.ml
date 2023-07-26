@@ -10,6 +10,7 @@ type token =
   | Equal
   | Pipe
   | Arrow
+  | KTrue | KFalse
   | KType | KOf
   | KLet | KRec | KAnd | KIn
   | KIf | KThen | KElse
@@ -97,6 +98,7 @@ let lex str =
     | Some ';' -> adv Semicolon
     | Some c ->
       let mk_lower_ident s = match s with
+                             | "true" -> KTrue | "false" -> KFalse
                              | "type" -> KType | "of" -> KOf
                              | "let" -> KLet | "rec" -> KRec
                              | "and" -> KAnd | "in" -> KIn
@@ -409,6 +411,8 @@ let parse: token list -> (ast, string) result =
   (* parsing patterns *)
   let rec pattern3 : ast_pat option parser = fun input k ->
     match input with
+    | KTrue        :: input -> k input (Some (PCon ("true", None)))
+    | KFalse       :: input -> k input (Some (PCon ("false", None)))
     | CharLit c    :: input -> k input (Some (PCharLit c))
     | IntLit i     :: input -> k input (Some (PIntLit i))
     | StrLit s     :: input -> k input (Some (PStrLit s))
@@ -623,6 +627,8 @@ let parse: token list -> (ast, string) result =
         k input (Some applications)))
   and expr3 = fun input k ->
     match input with
+    | KTrue  :: input -> k input (Some (Con ("true", None)))
+    | KFalse :: input -> k input (Some (Con ("false", None)))
     | IdentUpper mod_name :: Dot :: input ->
       (* NOTE: what we are dong here is desugaring
              Module.e = Module.(e) = let open Module in e
