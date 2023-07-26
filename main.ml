@@ -126,64 +126,69 @@ let lex str =
   in
   go 0 []
 
-type ('val_id, 'ty) typ_decl = | Datatype of ('val_id * 'ty list) list
+type ('var, 'con, 'ty) typ_decl =
+                               | Datatype of (string * 'ty list) list
                                | Alias    of 'ty
-type ('val_id, 'ty) pat      = | POr      of ('val_id, 'ty) pat
-                                           * ('val_id, 'ty) pat
-                               | PTuple   of ('val_id, 'ty) pat list
-                               | PList    of ('val_id, 'ty) pat list
-                               | PCon     of 'val_id
-                                           * ('val_id, 'ty) pat list option
+type ('var, 'con, 'ty) pat =
+                               | POr      of ('var, 'con, 'ty) pat
+                                           * ('var, 'con, 'ty) pat
+                               | PTuple   of ('var, 'con, 'ty) pat list
+                               | PList    of ('var, 'con, 'ty) pat list
+                               | PCon     of 'con
+                                           * ('var, 'con, 'ty) pat list option
                                | PCharLit of char
                                | PIntLit  of int
                                | PStrLit  of string
-                               | PVar     of 'val_id
-                               | PAsc     of ('val_id, 'ty) pat * 'ty
+                               | PVar     of 'var
+                               | PAsc     of ('var, 'con, 'ty) pat * 'ty
                                | PWild
-type ('val_id, 'ty) binding  =   ('val_id, 'ty) pat      (* head pattern *)
-                               * ('val_id, 'ty) pat list (* argument patterns *)
+type ('var, 'con, 'ty) binding = ('var, 'con, 'ty) pat      (* head pattern *)
+                               * ('var, 'con, 'ty) pat list (* argument patterns *)
                                * 'ty option              (* return type annotation *)
-                               * ('val_id, 'ty) expr     (* RHS *)
-and  ('val_id, 'ty) bindings = | Bindings of bool (* recursive? *)
-                                           * ('val_id, 'ty) binding list
-and  ('val_id, 'ty) expr     = | Tuple      of ('val_id, 'ty) expr list
-                               | List       of ('val_id, 'ty) expr list
-                               | Con        of 'val_id
-                                             * ('val_id, 'ty) expr list option
+                               * ('var, 'con, 'ty) expr     (* RHS *)
+and  ('var, 'con, 'ty) bindings =
+                               | Bindings of bool (* recursive? *)
+                                           * ('var, 'con, 'ty) binding list
+and  ('var, 'con, 'ty) expr =
+                               | Tuple      of ('var, 'con, 'ty) expr list
+                               | List       of ('var, 'con, 'ty) expr list
+                               | Con        of 'con
+                                             * ('var, 'con, 'ty) expr list option
                                | CharLit    of char
                                | IntLit     of int
                                | StrLit     of string
-                               | Var        of 'val_id
+                               | Var        of 'var
                                | LetOpen    of mod_expr
-                                             * ('val_id, 'ty) expr
-                               | App        of ('val_id, 'ty) expr
-                                             * ('val_id, 'ty) expr
-                               | LetIn      of ('val_id, 'ty) bindings
-                                             * ('val_id, 'ty) expr
-                               | Match      of ('val_id, 'ty) expr
-                                             * ( ('val_id, 'ty) pat
-                                               * ('val_id, 'ty) expr
+                                             * ('var, 'con, 'ty) expr
+                               | App        of ('var, 'con, 'ty) expr
+                                             * ('var, 'con, 'ty) expr
+                               | LetIn      of ('var, 'con, 'ty) bindings
+                                             * ('var, 'con, 'ty) expr
+                               | Match      of ('var, 'con, 'ty) expr
+                                             * ( ('var, 'con, 'ty) pat
+                                               * ('var, 'con, 'ty) expr
                                                ) list
-                               | IfThenElse of ('val_id, 'ty) expr
-                                             * ('val_id, 'ty) expr
-                                             * ('val_id, 'ty) expr
-                               | Fun        of ('val_id, 'ty) pat list
-                                             * ('val_id, 'ty) expr
-and                 mod_expr = | Module of string
-type ('val_id, 'ty) decl     = | Let      of ('val_id, 'ty) bindings
+                               | IfThenElse of ('var, 'con, 'ty) expr
+                                             * ('var, 'con, 'ty) expr
+                                             * ('var, 'con, 'ty) expr
+                               | Fun        of ('var, 'con, 'ty) pat list
+                                             * ('var, 'con, 'ty) expr
+and mod_expr =                 | Module of string
+type ('var, 'con, 'ty) decl =
+                               | Let      of ('var, 'con, 'ty) bindings
                                | Types    of ( string list
                                              * string
-                                             * ('val_id, 'ty) typ_decl
+                                             * ('var, 'con, 'ty) typ_decl
                                              ) list
 
 type ast_typ = | TVar of string
                | TCon of string * ast_typ list
-type ast_pat = (string, ast_typ) pat
-type ast_binding = (string, ast_typ) binding
-type ast_bindings = (string, ast_typ) bindings
-type ast_expr = (string, ast_typ) expr
-type ast_typ_decl = (string, ast_typ) typ_decl
-type ast_decl = (string, ast_typ) decl
+type ast_pat = (string, string, ast_typ) pat
+type ast_binding = (string, string, ast_typ) binding
+type ast_bindings = (string, string, ast_typ) bindings
+type ast_expr = (string, string, ast_typ) expr
+type ast_typ_decl = (string, string, ast_typ) typ_decl
+type ast_decl = (string, string, ast_typ) decl
 type ast = ast_decl list
 
 (* parser combinators *)
@@ -700,17 +705,24 @@ type core_type = | CQVar of core_qvar
                  | CCon  of string * core_type list
 and  core_uvar = | Unknown of string * core_var_id * core_level
                  | Known   of core_type
+(* ordinary variable binding *)
 type core_var  = | Binding of string (* name in the syntax *)
                             * core_var_id (* numeric ID *)
                             * core_qvar list (* forall parameters *)
                             * core_type (* type *)
+(* constructor variable binding *)
+type core_cvar = | CBinding of string (* name in the syntax *)
+                             * core_var_id (* numeric ID *)
+                             * core_qvar list (* forall parameters *)
+                             * core_type list (* parameter types *)
+                             * core_type      (* return type *)
 
-type core_pat = (core_var, unit) pat
-type core_binding = (core_var, unit) binding
-type core_bindings = (core_var, unit) bindings
-type core_expr = (core_var, unit) expr
-type core_typ_decl = (core_var, unit) typ_decl
-type core_decl = (core_var, unit) decl
+type core_pat = (core_var, core_cvar, unit) pat
+type core_binding = (core_var, core_cvar, unit) binding
+type core_bindings = (core_var, core_cvar, unit) bindings
+type core_expr = (core_var, core_cvar, unit) expr
+type core_typ_decl = (core_var, core_cvar, unit) typ_decl
+type core_decl = (core_var, core_cvar, unit) decl
 type core = core_decl list
 
 (* some helpers *)
