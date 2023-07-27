@@ -873,9 +873,9 @@ let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
   (* FIXME: avoid physical equality on types? *)
   if t1 == t2 then Ok () else
   match (ground t1, ground t2) with
-  | (CQVar _, _) | (_, CQVar _) ->
-    (* FIXME: ideally it would be possible to rule this out in the type system? *)
-    Error "found CQVar - should be impossible"
+  | (CQVar qv, _) | (_, CQVar qv) ->
+    let QVar (name, a) = qv in
+    Error ("found CQVar (" ^ name ^ " " ^ string_of_int a ^ ") - should be impossible")
   | (CUVar r, t') | (t', CUVar r) ->
     (* r must be Unknown *)
     let* () = occurs_check r t' in
