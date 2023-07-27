@@ -806,11 +806,12 @@ let map_disjoint_union
   : 'a string_map -> 'a string_map -> ('a string_map, dup_err) result
   = fun map1 map2 ->
     (* sort by size *)
-    let ((n1, m1), (n2, m2)) =
+    let (map1, map2) =
       let (n1, _) = map1 in
       let (n2, _) = map2 in
       if n1 < n2 then (map1, map2) else (map2, map1)
     in
+    let ((n1, m1), (n2, m2)) = (map1, map2) in
     let rec go m1 acc =
       match m1 with
       | [] -> Ok (n1 + n2, acc)
