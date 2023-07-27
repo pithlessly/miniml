@@ -736,6 +736,16 @@ let map_m
     | [] -> pure (List.rev ys)
     | x :: xs -> f x >>= fun y -> go (y :: ys) xs
   in go []
+let fold_left_m
+  ((pure  : 'b -> 'b_m),
+   ((>>=) : 'b_m -> ('b -> 'b_m) -> 'b_m))
+  (f : 'b -> 'a -> 'b_m)
+  : 'b -> 'a list -> 'b_m =
+  let rec go acc xs =
+    match xs with
+    | [] -> pure acc
+    | x :: xs -> f acc x >>= fun y -> go y xs
+  in go
 
 let state_monad =
   let pure a    = (fun s -> (s, a))
