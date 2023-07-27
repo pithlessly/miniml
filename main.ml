@@ -771,6 +771,36 @@ let counter () =
     i := 1 + v;
     v)
 
+let show_ty : core_type -> string =
+  let rec go prec ty =
+    let wrap_if thresh f =
+      if prec <= thresh then f else
+      fun acc -> "(" :: f (")" :: acc) in
+    match ty with
+    | CQVar (QVar (s, _)) -> fun acc -> "'" :: s :: acc
+    | CUVar r -> (match deref r with
+                  | Known ty -> go prec ty
+                  | Unknown (s, _, lvl) ->
+                    fun acc -> s :: "(" :: string_of_int lvl :: ")" :: acc)
+    | CCon ("->", a :: b :: []) ->
+      let a = go 1 a and b = go 0 b in
+      wrap_if 0 (fun acc -> a (" -> " :: b acc))
+    | CCon ("*", []) -> fun acc -> "unit" :: acc
+    | CCon ("*", a :: args) ->
+      let a = go 2 a and args = List.map (go 2) args in
+      wrap_if 1 (fun acc -> a (List.fold_right
+                                (fun arg acc -> " * " :: arg acc) args acc))
+    | CCon (con, []) -> fun acc -> con :: acc
+    | CCon (con, a :: []) ->
+      let a = go 2 a in fun acc -> a (" " :: con :: acc)
+    | CCon (con, a :: args) ->
+      let a = go 0 a and args = List.map (go 0) args in
+      fun acc -> "(" :: a (List.fold_right
+                            (fun arg acc -> ", " :: arg acc)
+                            args
+                            (") " :: con :: acc))
+  in fun ty -> String.concat "" (go 0 ty [])
+
 type 'a string_map = int * (string * 'a) list
 (* TODO: replace with a more efficient implementation *)
 let map_empty : 'a string_map = (0, [])
