@@ -1000,12 +1000,13 @@ let elab (ast : ast) : (core, string) result =
                | None   -> string_of_int id
     in ref (Unknown (name, id, lvl))
   in
-  let generalize (lvl : core_level) : core_type -> core_qvar list * core_type =
+  let generalize (lvl : core_level) : core_type list -> core_qvar list * core_type list =
+    (* TODO: we don't need to return a new type list here *)
     let rec go ty qvars =
       match ty with
       | CQVar qv -> (qvars, ty)
       | CCon (c, tys) ->
-        let (qvars, tys) = map_m state_monad go tys qvars in
+        let (qvars, tys) = go_list tys qvars in
         (qvars, (CCon (c, tys)))
       | CUVar r ->
         match deref r with
@@ -1018,7 +1019,9 @@ let elab (ast : ast) : (core, string) result =
             (qvars, CQVar qv)
           else
             (qvars, ty)
-    in fun ty -> go ty []
+    and go_list tys qvars =
+      map_m state_monad go tys qvars
+    in fun tys -> go_list tys []
   in
   let instantiate lvl (qvars : core_qvar list) () : core_type -> core_type =
     let qvars = List.map (fun var -> let QVar (name, _) = var in
@@ -1195,37 +1198,98 @@ let elab (ast : ast) : (core, string) result =
         List.fold_right (fun (_, ty1) ty2 -> CCon ("->", ty1 :: ty2 :: [])) pats' ty_res
       )
   and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings, string) result =
-    fun ctx bindings ->
-    match bindings with
-    | Bindings (true,  _)        -> Error "TODO: handle recursive bindings"
-    | Bindings (false, bindings) ->
-      map_m error_state_monad
-            (fun (head, args, annot, rhs) ctx ->
-              match annot with
-              | Some _ -> Error "TODO: handle type annotations"
-              | None ->
-                infer_pat  lvl       ctx       head >>= fun (ctx_after, (head', ty_head)) ->
-                infer_pats (lvl + 1) ctx       args >>= fun (ctx_inner, pats') ->
-                infer      (lvl + 1) ctx_inner rhs  >>= fun (rhs', ty_rhs) ->
-                unify ty_head (List.fold_right
-                                (fun (_, ty1) ty2 -> CCon ("->", ty1 :: ty2 :: []))
-                                pats' ty_rhs)
-                >>= fun () ->
-                (* FIXME: right now we are only generalizing when the head is a variable.
-                   FIXME: we don't implement the value restriction, so this is unsound. *)
-                let (head', ctx_after) =
-                  match head with
-                  | PVar s ->
-                    (* TODO: generating a new variable and discarding the old ctx_after is janky *)
-                    let scheme = generalize lvl ty_head in
-                    let v = Binding (s, next_var_id (), fst scheme, snd scheme) in
-                    (PVar v, extend ctx v)
-                  | _ ->
-                    (head', ctx_after)
-                in
-                Ok (ctx_after, (head', List.map fst pats', None, rhs'))
-            ) bindings ctx
-      >>= fun (ctx, bindings) -> Ok (ctx, Bindings (false, bindings))
+    fun ctx (Bindings (is_rec, bindings)) ->
+    (* for each binding, determine the variables bound by the head *)
+    map_m error_monad
+      (fun binding ->
+        let (head, _, _, _) = binding in
+        pat_bound_vars lvl head >>= fun vars ->
+        Ok (vars, binding)
+      ) bindings >>= fun bindings ->
+    (* combine all the bindings *)
+    (
+      let sets = List.map fst bindings in
+      match fold_left_m error_monad map_disjoint_union map_empty sets with
+      | Ok combined      -> Ok combined
+      | Error (DupErr v) ->
+        Error ("variable bound multiple times in a group of definitions: " ^ v)
+    ) >>= fun vars ->
+    (* the context used for the bindings contains these variables iff the binding group
+       is recursive *)
+    let ctx_inner = if is_rec
+                    then map_fold_left (fun ctx (_, v) -> extend ctx v) ctx vars
+                    else ctx
+    in
+    (* infer each binding *)
+    map_m error_monad
+      (fun (bound_vars, (head, args, annot, rhs)) ->
+        (
+          match annot with
+          | Some _ -> Error "TODO: handle recursive bindings"
+          | None   -> Ok ()
+        ) >>= fun () ->
+        infer_pat_with_vars lvl ctx bound_vars head >>= fun (head', ty_head) ->
+        infer_pats (lvl + 1) ctx_inner args         >>= fun (ctx_inner, args') ->
+        infer      (lvl + 1) ctx_inner rhs          >>= fun (rhs', ty_rhs) ->
+        unify ty_head (List.fold_right
+                        (fun (_, ty1) ty2 -> CCon ("->", ty1 :: ty2 :: []))
+                        args' ty_rhs)               >>= fun () ->
+        let args' = List.map fst args' in
+        (
+          (* TODO: the value restriction is a little looser than this *)
+          match (args, rhs) with
+          | (_ :: _, _)      -> Ok true
+          | ([], Fun (_, _)) -> Ok true
+          | _                -> if is_rec then
+                                  Error "recursive bindings cannot have side effects"
+                                else
+                                  Ok false
+        ) >>= fun can_generalize ->
+        Ok (bound_vars, can_generalize, ((head', args', None, rhs') : core_binding))
+      ) bindings
+    >>= fun (bindings:
+             (core_var string_map * bool * core_binding) list
+            ) ->
+    let bound_vars : core_var list =
+      (* flatten the maps in `bindings`; order is irrelevant, and we
+         already know them to be disjoint *)
+      List.fold_left (fun acc (bv, _, _) ->
+        map_fold_left (fun acc (_, v) -> v :: acc) acc bv
+      ) [] bindings
+    in
+    (* conservatively assume that we can only generalize the whole group
+       of definitions if every single one meets the criteria *)
+    let can_generalize =
+      List.fold_left (fun acc (_, cg, _) -> acc && cg) true bindings in
+    let bound_vars : core_var list =
+      if not can_generalize then
+        bound_vars
+      else
+        let types = List.map (fun (Binding (_, _, [], ty)) -> ty) bound_vars in
+        let (qvars, types) = generalize lvl types in
+        List.map2 (fun var ty ->
+          let Binding (name, id, _, _) = var in
+          (* NOTE: What's going on here? We are allocating a "new" variable,
+          but giving it the same ID as the above. This is fine, because (since
+          generalization mutates the types it encounters, replacing the uvars
+          with qvars) the references to this variable in the rhs's will all be
+          of the form:
+                        Var/PVar (Binding (name, id, [], ty'))
+          where ty' is equivalent to ty modulo following `Known` links.
+          Thus we can feel OK about saying that these two objects are "really"
+          referring to the "same" variable binding, and we are just allowing it
+          to have a more polymorphic type in the subsequent context.
+          However, this does feel a little inelegant, and it would be nice to
+          avoid it, e.g. by making the qvar list in Binding be a ref. *)
+          (* TODO: maybe trim the qvars to those which appear in the ty? *)
+          Binding (name, id, qvars, ty)
+        ) bound_vars types
+    in
+    let bindings = List.map (fun (_, _, binding) -> binding) bindings in
+    Ok (
+      List.fold_left extend ctx bound_vars,
+      Bindings (is_rec, bindings)
+    )
   in
   map_m error_state_monad
         (fun decl ctx ->
