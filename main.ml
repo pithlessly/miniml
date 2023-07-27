@@ -927,6 +927,7 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
   let t_string   = CCon ("string", []) in
   let t_bool     = CCon ("bool",   []) in
   let t_option t = CCon ("option", t :: []) in
+  let t_list   t = CCon ("list",   t :: []) in
   (* it's okay to reuse QVars for multiple variables here -
      they have the same ID, but this is only used to distinguish
      them during instantiation *)
@@ -949,6 +950,8 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
   mk_ctx (fun add add_con add_mod ->
     add "&&" [] (t_bool --> (t_bool --> t_bool));
     add "||" [] (t_bool --> (t_bool --> t_bool));
+    add "+"  [] (t_int --> (t_int --> t_int));
+    add "-"  [] (t_int --> (t_int --> t_int));
     (* TODO: make ordered comparisons int-specific *)
     add ">=" qa (a --> (a --> t_bool));
     add "<=" qa (a --> (a --> t_bool));
@@ -964,6 +967,7 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
     ));
     add_con "None" qa [] (t_option a);
     add_con "Some" qa (a :: []) (t_option a);
+    add "::" qa (a --> (t_list a --> t_list a));
     ()
   )
 
