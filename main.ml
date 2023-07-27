@@ -844,12 +844,13 @@ let rec occurs_check : core_uvar ref -> core_type -> (unit, string) result = fun
       Error "occurs check failed (cannot construct infinite type)"
     else
       match deref v' with
-      | Known ty'         -> occurs_check v ty'
-      | Unknown (_, _, lvl') ->
+      | Known ty'                  -> occurs_check v ty'
+      | Unknown (name', id', lvl') ->
         Ok (
           match deref v with
           | Known _             -> ()
-          | Unknown (name, id, lvl) -> v := Unknown (name, id, min lvl lvl')
+          | Unknown (_, _, lvl) ->
+            v' := Unknown (name', id', min lvl lvl');
         )
 
 (* follow `Known`s until we get where we wanted *)
@@ -878,8 +879,15 @@ let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
     Error ("found CQVar (" ^ name ^ " " ^ string_of_int a ^ ") - should be impossible")
   | (CUVar r, t') | (t', CUVar r) ->
     (* r must be Unknown *)
-    let* () = occurs_check r t' in
-    Ok (r := Known t')
+    if
+      match t' with
+      | CUVar r' -> r == r'
+      | _        -> false
+    then
+      Ok ()
+    else
+      let* () = occurs_check r t' in
+      Ok (r := Known t')
   | (CCon (c1, p1), CCon (c2, p2)) ->
     if c1 <> c2 then Error ("cannot unify different type constructors: " ^ c1 ^ " != " ^ c2)
     else unify_all p1 p2
