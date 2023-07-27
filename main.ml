@@ -1007,6 +1007,7 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
     add_mod "String" (mk_ctx (fun add _ _ ->
       add "length" [] (t_string --> t_int);
       add "get"    [] (t_string --> (t_int --> t_char));
+      add "sub"    [] (t_string --> (t_int --> (t_int --> t_string)));
       ()
     ));
     add_con "None" qa [] (t_option a);
