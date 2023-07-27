@@ -1025,50 +1025,51 @@ let elab (ast : ast) : (core, string) result =
                     | CCon (s, tys) -> CCon (s, List.map go tys)
     in go
   in
-  let infer_pat lvl : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
-    (* Elaboration of patterns requires two phases. Originally we just traversed the pattern
-       and added every variable we found to the context, with a new uvar for its type.
-       The reason this doesn't work is because of 'or'-patterns, which require:
-       (1) the set of variables bound in both branches be the same;
-       (2) the resulting context contain only one copy of the variables;
-       (3) each copy of a variable in the elaborated branches refer to the same var ID.
-       So instead, elaboration proceeds in three steps:
-       - traverse the pattern to determine the names of all bound variables
-         (and checking consistency between branches);
-       - create a new Var (with ids and new uvars for types) for each bound variable;
-       - traverse the pattern again, translating each identifier to its corresponding Var.
-       *)
-    let bound_vars : ast_pat -> (unit string_map, string) result =
-      let rec go pat =
-        match pat with
-        | POr (p1, p2) -> go p1 >>= fun v1 ->
-                          go p2 >>= fun v2 ->
-                          if map_eql (fun () () -> true) v1 v2 then Ok v1
-                          else Error "branches do not bind the same variables"
-        | PTuple ps    -> go_list ps
-        | PList ps     -> go_list ps
-        | PCon (_, ps) -> (match ps with | Some ps -> go_list ps
-                                         | None    -> Ok map_empty)
-        | PCharLit _ | PIntLit _ | PStrLit _
-        | PWild        -> Ok map_empty
-        | PVar v       -> Ok (map_singleton (v, ()))
-        | PAsc (p, _)  -> go p
-      and go_list pats =
-        List.fold_left merge (Ok map_empty) (List.map go pats)
-      and merge ev1 ev2 =
-        ev1 >>= fun v1 ->
-        ev2 >>= fun v2 ->
-        match map_disjoint_union v1 v2 with
-        | Ok v' -> Ok v'
-        | Error (DupErr v) -> Error "variable bound multiple times in the same pattern: v"
-      in go
+  (* Elaboration of patterns requires two phases. Originally we just traversed the pattern
+     and added every variable we found to the context, with a new uvar for its type.
+     The reason this doesn't work is because of 'or'-patterns, which require:
+     (1) the set of variables bound in both branches be the same;
+     (2) the resulting context contain only one copy of the variables;
+     (3) each copy of a variable in the elaborated branches refer to the same var ID.
+     So instead, elaboration proceeds in three steps:
+     - traverse the pattern to determine the names of all bound variables
+       (and checking consistency between branches);
+     - create a new Var (with ids and new uvars for types) for each bound variable;
+     - traverse the pattern again, translating each identifier to its corresponding Var.
+     *)
+  let pat_bound_vars : core_level -> ast_pat -> (core_var string_map, string) result =
+    let rec go pat =
+      match pat with
+      | POr (p1, p2) -> go p1 >>= fun v1 ->
+                        go p2 >>= fun v2 ->
+                        if map_eql (fun () () -> true) v1 v2 then Ok v1
+                        else Error "branches do not bind the same variables"
+      | PTuple ps    -> go_list ps
+      | PList ps     -> go_list ps
+      | PCon (_, ps) -> (match ps with | Some ps -> go_list ps
+                                       | None    -> Ok map_empty)
+      | PCharLit _ | PIntLit _ | PStrLit _
+      | PWild        -> Ok map_empty
+      | PVar v       -> Ok (map_singleton (v, ()))
+      | PAsc (p, _)  -> go p
+    and go_list pats =
+      List.fold_left merge (Ok map_empty) (List.map go pats)
+    and merge ev1 ev2 =
+      ev1 >>= fun v1 ->
+      ev2 >>= fun v2 ->
+      match map_disjoint_union v1 v2 with
+      | Ok v' -> Ok v'
+      | Error (DupErr v) -> Error "variable bound multiple times in the same pattern: v"
     in
-    fun ctx pat ->
-    bound_vars pat >>= fun bindings ->
-    let bindings = map_map (fun s () -> let uv = CUVar (new_uvar lvl (Some s) ()) in
-                                        Binding (s, next_var_id (), [], uv)) bindings
-    in
-    let ctx' = map_fold_left (fun ctx (_, v) -> extend ctx v) ctx bindings in
+    fun lvl pat ->
+      go pat >>= fun bindings ->
+      Ok (map_map
+        (fun s () -> let uv = CUVar (new_uvar lvl (Some s) ()) in
+                     Binding (s, next_var_id (), [], uv)
+        ) bindings)
+  (* TODO: exhaustiveness checking? *)
+  and infer_pat_with_vars lvl ctx (bindings : core_var string_map) :
+                          ast_pat -> (core_pat * core_type, string) result =
     let rec go pat =
       match pat with
       | POr (p1, p2) -> go p1         >>= fun (p1', ty1) ->
@@ -1093,7 +1094,14 @@ let elab (ast : ast) : (core, string) result =
       | PWild        -> let ty = CUVar (new_uvar lvl None ()) in
                         Ok (PWild, ty)
       (* TODO: implement PTuple, PList, PAsc *)
-    in go pat >>= fun pat' -> Ok (ctx', pat')
+    in go
+  in
+  let infer_pat lvl : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
+    fun ctx pat ->
+    pat_bound_vars lvl pat                   >>= fun bindings ->
+    infer_pat_with_vars lvl ctx bindings pat >>= fun pat' ->
+    let ctx' = map_fold_left (fun ctx (_, v) -> extend ctx v) ctx bindings in
+    Ok (ctx', pat')
   in
   let infer_pats lvl : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list, string) result =
     Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl)))
