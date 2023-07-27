@@ -763,6 +763,7 @@ let error_state_monad =
 let deref = (!)
 let (>>=) x f = snd error_monad x f
 let (=<<) f x = (>>=) x f
+let (let*) x f = (>>=) x f
 let counter () =
   let i = ref 0 in
   (fun () ->
@@ -836,7 +837,7 @@ let rec occurs_check : core_uvar ref -> core_type -> (unit, string) result = fun
     let rec go tys =
       match tys with
       | []         -> Ok ()
-      | ty' :: tys -> occurs_check v ty' >>= fun () -> go tys
+      | ty' :: tys -> let* () = occurs_check v ty' in go tys
     in go tys
   | CUVar v' ->
     if v == v' then
@@ -877,14 +878,15 @@ let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
     Error "found CQVar - should be impossible"
   | (CUVar r, t') | (t', CUVar r) ->
     (* r must be Unknown *)
-    occurs_check r t' >>= (fun () -> Ok (r := Known t'))
+    let* () = occurs_check r t' in
+    Ok (r := Known t')
   | (CCon (c1, p1), CCon (c2, p2)) ->
     if c1 <> c2 then Error ("cannot unify different type constructors: " ^ c1 ^ " != " ^ c2)
     else unify_all p1 p2
 and unify_all : core_type list -> core_type list -> (unit, string) result = fun ts1 ts2 ->
   match (ts1, ts2) with
   | ([], []) -> Ok ()
-  | (t1 :: ts1, t2 :: ts2) -> unify t1 t2 >>= (fun () -> unify_all ts1 ts2)
+  | (t1 :: ts1, t2 :: ts2) -> let* () = unify t1 t2 in unify_all ts1 ts2
   | _ -> Error "cannot unify different numbers of arguments"
 
 type ctx = Ctx of core_var list       (* variables *)
@@ -958,23 +960,23 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
   )
 
 let preprocess_constructor_args
+  (* TODO: move into elab once we support generalizing nested functions *)
   (instantiate : core_qvar list -> unit -> core_type -> core_type)
   (mk_tuple : 'a list -> 'a) ctx name (args : 'a list option)
   : (core_cvar * core_type list * core_type * 'a list, string) result =
-  (
+  let* cv =
     match lookup_con name ctx with
     | None    -> Error ("constructor not in scope: " ^ name)
     | Some cv -> Ok cv
-  ) >>= fun cv ->
+  in
   let CBinding (_, _, qvars, param_tys, result_tys) = cv in
   let instantiate = instantiate qvars () in
   let param_tys = List.map instantiate param_tys in
   let result_ty = instantiate result_tys in
   (* make sure we're applying the constructor to the right number of arguments.
      as a special case, passing the "wrong" number of arguments to a 1-param
-     tuple, like `Some (1, 2)`, causes it to be treated as a tuple.
-  *)
-  (
+     tuple, like `Some (1, 2)`, causes it to be treated as a tuple. *)
+  let* args =
     let num_params = List.length param_tys in
     match (num_params, args) with
     | (0, None)              -> Ok []
@@ -986,7 +988,7 @@ let preprocess_constructor_args
                                 then Ok args
                                 else Error ("constructor " ^ name
                                             ^ " is applied to the wrong number of arguments")
-  ) >>= fun args ->
+  in
   Ok (cv, param_tys, result_ty, args)
 
 let elab (ast : ast) : (core, string) result =
@@ -1054,8 +1056,8 @@ let elab (ast : ast) : (core, string) result =
   let pat_bound_vars : core_level -> ast_pat -> (core_var string_map, string) result =
     let rec go pat =
       match pat with
-      | POr (p1, p2) -> go p1 >>= fun v1 ->
-                        go p2 >>= fun v2 ->
+      | POr (p1, p2) -> let* v1 = go p1 in
+                        let* v2 = go p2 in
                         if map_eql (fun () () -> true) v1 v2 then Ok v1
                         else Error "branches do not bind the same variables"
       | PTuple ps    -> go_list ps
@@ -1069,8 +1071,8 @@ let elab (ast : ast) : (core, string) result =
     and go_list pats =
       List.fold_left merge (Ok map_empty) (List.map go pats)
     and merge ev1 ev2 =
-      ev1 >>= fun v1 ->
-      ev2 >>= fun v2 ->
+      let* v1 = ev1 in
+      let* v2 = ev2 in
       match map_disjoint_union v1 v2 with
       | Ok v' -> Ok v'
       | Error (DupErr v) -> Error "variable bound multiple times in the same pattern: v"
@@ -1086,16 +1088,17 @@ let elab (ast : ast) : (core, string) result =
                           ast_pat -> (core_pat * core_type, string) result =
     let rec go pat =
       match pat with
-      | POr (p1, p2) -> go p1         >>= fun (p1', ty1) ->
-                        go p2         >>= fun (p2', ty2) ->
-                        unify ty1 ty2 >>= fun () ->
+      | POr (p1, p2) -> let* (p1', ty1) = go p1 in
+                        let* (p2', ty2) = go p2 in
+                        let* () = unify ty1 ty2 in
                         Ok (POr (p1', p2'), ty1)
       | PCon (name, args) ->
-        preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
-                                    ctx name args
-        >>= fun (cv, param_tys, result_ty, args) ->
-        map_m error_monad go args >>= fun args' ->
-        unify_all param_tys (List.map snd args') >>= fun () ->
+        let* (cv, param_tys, result_ty, args) =
+          preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
+                                      ctx name args
+        in
+        let* args' = map_m error_monad go args in
+        let* () = unify_all param_tys (List.map snd args') in
         let args' = List.map fst args' in
         Ok (PCon (cv, Some args'), ground result_ty)
       | PCharLit c   -> Ok (PCharLit c, CCon ("char", []))
@@ -1112,8 +1115,8 @@ let elab (ast : ast) : (core, string) result =
   in
   let infer_pat lvl : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
     fun ctx pat ->
-    pat_bound_vars lvl pat                   >>= fun bindings ->
-    infer_pat_with_vars lvl ctx bindings pat >>= fun pat' ->
+    let* bindings = pat_bound_vars lvl pat in
+    let* pat' = infer_pat_with_vars lvl ctx bindings pat in
     let ctx' = map_fold_left (fun ctx (_, v) -> extend ctx v) ctx bindings in
     Ok (ctx', pat')
   in
@@ -1124,23 +1127,24 @@ let elab (ast : ast) : (core, string) result =
     fun ctx e ->
     match e with
     | Tuple es ->
-      map_m error_monad (infer lvl ctx) es >>= fun elab ->
-        Ok (Tuple (List.map fst elab),
-            CCon ("*", List.map snd elab))
+      let* elab = map_m error_monad (infer lvl ctx) es in
+      Ok (Tuple (List.map fst elab),
+          CCon ("*", List.map snd elab))
     | List es ->
       let ty_elem = CUVar (new_uvar lvl None ()) in
       map_m error_monad (fun e ->
-                          infer lvl ctx e    >>= fun (e', ty_e) ->
-                          unify ty_e ty_elem >>= fun () ->
+                          let* (e', ty_e) = infer lvl ctx e in
+                          let* () = unify ty_e ty_elem in
                           Ok e'
                         ) es >>= fun es' ->
         Ok (List es', ground ty_elem)
     | Con (name, args) ->
-      preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
-                                  ctx name args
-      >>= fun (cv, param_tys, result_ty, args) ->
-      map_m error_monad (infer lvl ctx) args >>= fun args' ->
-      unify_all param_tys (List.map snd args') >>= fun () ->
+      let* (cv, param_tys, result_ty, args) =
+        preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
+                                    ctx name args
+      in
+      let* args' = map_m error_monad (infer lvl ctx) args in
+      let* () = unify_all param_tys (List.map snd args') in
       let args' = List.map fst args' in
       Ok (Con (cv, Some args'), ground result_ty)
     | CharLit c -> Ok (CharLit c, CCon ("char", []))
@@ -1157,42 +1161,43 @@ let elab (ast : ast) : (core, string) result =
       | Some ctx -> infer lvl ctx e
       | None     -> Error ("module not in scope: " ^ name))
     | App (e1, e2) ->
-      infer lvl ctx e1 >>= fun (e1', ty_fun) ->
-      infer lvl ctx e2 >>= fun (e2', ty_arg) ->
+      let* (e1', ty_fun) = infer lvl ctx e1 in
+      let* (e2', ty_arg) = infer lvl ctx e2 in
       let uv = new_uvar lvl None () in
       let ty_res = CUVar uv in
-      unify ty_fun (CCon ("->", (ty_arg :: ty_res :: []))) >>= fun () ->
+      let* () = unify ty_fun (CCon ("->", (ty_arg :: ty_res :: []))) in
       Ok (App (e1', e2'), ground ty_res)
     | LetIn (bindings, e) ->
-      infer_bindings lvl ctx bindings >>= fun (ctx', bindings') ->
-      infer lvl ctx' e >>= fun (e', ty_e) ->
+      let* (ctx', bindings') = infer_bindings lvl ctx bindings in
+      let* (e', ty_e) = infer lvl ctx' e in
       Ok (LetIn (bindings', e'), ground ty_e)
     | Match (e_scrut, cases) ->
       let ty_res = CUVar (new_uvar lvl None ()) in
-      infer lvl ctx e_scrut >>= fun (e_scrut', ty_scrut) ->
-      map_m error_monad
+      let* (e_scrut', ty_scrut) = infer lvl ctx e_scrut in
+      let* cases' =
+        map_m error_monad
             (fun (pat, e) ->
-              infer_pat lvl ctx pat >>= fun (ctx', (pat', ty_pat)) ->
-              unify ty_pat ty_scrut >>= fun () ->
-              infer lvl ctx' e      >>= fun (e', ty_e) ->
-              unify ty_e ty_res     >>= fun () ->
+              let* (ctx', (pat', ty_pat)) = infer_pat lvl ctx pat in
+              let* ()                     = unify ty_pat ty_scrut in
+              let* (e', ty_e)             = infer lvl ctx' e      in
+              let* ()                     = unify ty_e ty_res     in
               Ok (pat', e'))
             cases
-      >>= fun cases' ->
+      in
       Ok (
         Match (e_scrut', cases'),
         ground ty_res
       )
     | IfThenElse (e1, e2, e3) ->
-      infer lvl ctx e1                  >>= fun (e1', ty_cond) ->
-      unify ty_cond (CCon ("bool", [])) >>= fun () ->
-      infer lvl ctx e2                  >>= fun (e2', ty_then) ->
-      infer lvl ctx e3                  >>= fun (e3', ty_else) ->
-      unify ty_then ty_else             >>= fun () ->
+      let* (e1', ty_cond) = infer lvl ctx e1                  in
+      let* ()             = unify ty_cond (CCon ("bool", [])) in
+      let* (e2', ty_then) = infer lvl ctx e2                  in
+      let* (e3', ty_else) = infer lvl ctx e3                  in
+      let* ()             = unify ty_then ty_else             in
       Ok (IfThenElse (e1', e2', e3'), ground ty_then)
     | Fun (pats, e) ->
-      infer_pats lvl ctx pats >>= fun (ctx', pats') ->
-      infer lvl ctx' e >>= fun (e', ty_res) ->
+      let* (ctx', pats') = infer_pats lvl ctx pats in
+      let* (e', ty_res) = infer lvl ctx' e in
       Ok (
         Fun (List.map fst pats', e'),
         List.fold_right (fun (_, ty1) ty2 -> CCon ("->", ty1 :: ty2 :: [])) pats' ty_res
@@ -1200,20 +1205,22 @@ let elab (ast : ast) : (core, string) result =
   and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings, string) result =
     fun ctx (Bindings (is_rec, bindings)) ->
     (* for each binding, determine the variables bound by the head *)
-    map_m error_monad
-      (fun binding ->
-        let (head, _, _, _) = binding in
-        pat_bound_vars lvl head >>= fun vars ->
-        Ok (vars, binding)
-      ) bindings >>= fun bindings ->
+    let* bindings =
+      map_m error_monad
+        (fun binding ->
+          let (head, _, _, _) = binding in
+          let* vars = pat_bound_vars lvl head in
+          Ok (vars, binding)
+        ) bindings
+    in
     (* combine all the bindings *)
-    (
+    let* vars =
       let sets = List.map fst bindings in
       match fold_left_m error_monad map_disjoint_union map_empty sets with
       | Ok combined      -> Ok combined
       | Error (DupErr v) ->
         Error ("variable bound multiple times in a group of definitions: " ^ v)
-    ) >>= fun vars ->
+    in
     (* the context used for the bindings contains these variables iff the binding group
        is recursive *)
     let ctx_inner = if is_rec
@@ -1221,35 +1228,36 @@ let elab (ast : ast) : (core, string) result =
                     else ctx
     in
     (* infer each binding *)
-    map_m error_monad
-      (fun (bound_vars, (head, args, annot, rhs)) ->
-        (
-          match annot with
-          | Some _ -> Error "TODO: handle recursive bindings"
-          | None   -> Ok ()
-        ) >>= fun () ->
-        infer_pat_with_vars lvl ctx bound_vars head >>= fun (head', ty_head) ->
-        infer_pats (lvl + 1) ctx_inner args         >>= fun (ctx_inner, args') ->
-        infer      (lvl + 1) ctx_inner rhs          >>= fun (rhs', ty_rhs) ->
-        unify ty_head (List.fold_right
-                        (fun (_, ty1) ty2 -> CCon ("->", ty1 :: ty2 :: []))
-                        args' ty_rhs)               >>= fun () ->
-        let args' = List.map fst args' in
-        (
-          (* TODO: the value restriction is a little looser than this *)
-          match (args, rhs) with
-          | (_ :: _, _)      -> Ok true
-          | ([], Fun (_, _)) -> Ok true
-          | _                -> if is_rec then
-                                  Error "recursive bindings cannot have side effects"
-                                else
-                                  Ok false
-        ) >>= fun can_generalize ->
-        Ok (bound_vars, can_generalize, ((head', args', None, rhs') : core_binding))
-      ) bindings
-    >>= fun (bindings:
-             (core_var string_map * bool * core_binding) list
-            ) ->
+    let* bindings =
+      map_m error_monad
+        (fun (bound_vars, (head, args, annot, rhs)) ->
+          let* () =
+            match annot with
+            | Some _ -> Error "TODO: handle recursive bindings"
+            | None   -> Ok ()
+          in
+          let* (head', ty_head)   = infer_pat_with_vars lvl ctx bound_vars head in
+          let* (ctx_inner, args') = infer_pats (lvl + 1) ctx_inner args         in
+          let* (rhs', ty_rhs)     = infer      (lvl + 1) ctx_inner rhs          in
+          let* ()                 =
+            unify ty_head (List.fold_right
+                            (fun (_, ty1) ty2 -> CCon ("->", ty1 :: ty2 :: []))
+                            args' ty_rhs)
+          in
+          let args' = List.map fst args' in
+          let* can_generalize =
+            (* TODO: the value restriction is a little looser than this *)
+            match (args, rhs) with
+            | (_ :: _, _)      -> Ok true
+            | ([], Fun (_, _)) -> Ok true
+            | _                -> if is_rec then
+                                    Error "recursive bindings cannot have side effects"
+                                  else
+                                    Ok false
+          in
+          Ok (bound_vars, can_generalize, ((head', args', None, rhs') : core_binding))
+        ) bindings
+    in
     let bound_vars : core_var list =
       (* flatten the maps in `bindings`; order is irrelevant, and we
          already know them to be disjoint *)
@@ -1291,14 +1299,15 @@ let elab (ast : ast) : (core, string) result =
       Bindings (is_rec, bindings)
     )
   in
-  map_m error_state_monad
+  let* (_, ast') =
+    map_m error_state_monad
         (fun decl ctx ->
           match decl with
-          | Let bindings -> infer_bindings (* lvl = *) 0 ctx bindings
-                            >>= fun (ctx, bindings') -> Ok (ctx, Let bindings')
+          | Let bindings -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings in
+                            Ok (ctx, Let bindings')
           | _            -> Error "TODO: this type of binding is not yet supported"
         ) ast (initial_ctx next_var_id)
-  >>= fun (_, ast') -> Ok ast'
+  in Ok ast'
 
 let text =
   let f = In_channel.open_text "scratchpad.mini-ml" in
