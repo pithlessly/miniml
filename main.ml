@@ -1105,6 +1105,14 @@ let elab (ast : ast) : (core, string) result =
       map_m error_monad (infer lvl ctx) es >>= fun elab ->
         Ok (Tuple (List.map fst elab),
             CCon ("*", List.map snd elab))
+    | List es ->
+      let ty_elem = CUVar (new_uvar lvl None ()) in
+      map_m error_monad (fun e ->
+                          infer lvl ctx e    >>= fun (e', ty_e) ->
+                          unify ty_e ty_elem >>= fun () ->
+                          Ok e'
+                        ) es >>= fun es' ->
+        Ok (List es', ground ty_elem)
     | Con (name, args) ->
       preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
                                   ctx name args
