@@ -1089,6 +1089,35 @@ let elab (ast : ast) : (core, string) result =
                | None   -> string_of_int id
     in ref (Unknown (name, id, lvl))
   in
+  let ast_typ_bound_vars : ast_typ list -> unit string_map =
+    let rec go acc typ =
+      match typ with
+      | TVar s -> (match map_insert (s, ()) acc with
+                   | Some acc -> acc
+                   | None     -> acc)
+      | TCon (_, args) -> List.fold_left go acc args
+    and go_list acc types = List.fold_left go acc types
+    in go_list map_empty
+  in
+  let translate_ast_typ ctx (bindings : core_uvar ref string_map)
+                        : ast_typ -> (core_type, string) result =
+    let rec go typ =
+      match typ with
+      | TVar s -> (match map_lookup s bindings with
+                   | None -> Error "impossible: we should have created suitable bindings?"
+                   | Some uv -> Ok (CUVar uv))
+      | TCon (name, args) ->
+        match lookup_ty name ctx with
+        | None -> Error ("type constructor not in scope: " ^ name)
+        | Some (con, arity) ->
+          if arity <> List.length args then
+            Error ("type constructor " ^ name ^ " expects " ^
+                   string_of_int arity ^ " argument(s)")
+          else
+            let* args' = map_m error_monad go args in
+            Ok (CTCon (con, args'))
+    in go
+  in
   let generalize (lvl : core_level) : core_type list -> core_qvar list * core_type list =
     (* TODO: we don't need to return a new type list here *)
     let rec go ty qvars =
@@ -1195,9 +1224,18 @@ let elab (ast : ast) : (core, string) result =
                          | None   -> Error "impossible: we should have created suitable bindings?"
                          | Some v -> let Binding (_, _, _, ty) = v in
                                      Ok (PVar v, ty))
+      | PAsc (p, ty) -> let* (p', ty1) = go p in
+                        (* TODO: in this implementation, the type variables introduced
+                        in every ascription are not related to each other, even though
+                        they should be *)
+                        let tyvars = ast_typ_bound_vars [ty] in
+                        let tyvars = map_map (fun s () -> new_uvar lvl (Some s) ()) tyvars in
+                        let* ty' = translate_ast_typ ctx tyvars ty in
+                        let* () = unify ty1 ty' in
+                        Ok (p', ty')
       | PWild        -> let ty = CUVar (new_uvar lvl None ()) in
                         Ok (PWild, ty)
-      (* TODO: implement PTuple, PList, PAsc *)
+      (* TODO: implement PTuple, PList *)
     in go
   in
   let infer_pat lvl : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
@@ -1318,15 +1356,18 @@ let elab (ast : ast) : (core, string) result =
     let* bindings =
       map_m error_monad
         (fun (bound_vars, (head, args, annot, rhs)) ->
-          let* () =
-            match annot with
-            | Some _ -> Error "TODO: handle recursive bindings"
-            | None   -> Ok ()
-          in
           let* (head', ty_head)   = infer_pat_with_vars lvl ctx bound_vars head in
           let* (ctx_inner, args') = infer_pats (lvl + 1) ctx_inner args         in
           let* (rhs', ty_rhs)     = infer      (lvl + 1) ctx_inner rhs          in
-          let* ()                 =
+          let* () =
+            match annot with
+            | None    -> Ok ()
+            | Some ty -> let tyvars = ast_typ_bound_vars [ty] in
+                         let tyvars = map_map (fun s () -> new_uvar (lvl + 1) (Some s) ()) tyvars in
+                         let* ty' = translate_ast_typ ctx tyvars ty in
+                         unify ty_rhs ty'
+          in
+          let* () =
             unify ty_head (List.fold_right
                             (fun (_, ty1) ty2 -> (ty1 --> ty2))
                             args' ty_rhs)
