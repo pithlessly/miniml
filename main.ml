@@ -931,47 +931,39 @@ and unify_all : core_type list -> core_type list -> (unit, string) result = fun 
   | (t1 :: ts1, t2 :: ts2) -> let* () = unify t1 t2 in unify_all ts1 ts2
   | _ -> Error "cannot unify different numbers of arguments"
 
-type ctx = Ctx of core_var list       (* variables *)
-                * core_cvar list      (* constructors *)
-                * (string * ctx) list (* modules *)
-let empty_ctx = Ctx ([], [], [])
+type ctx = Ctx of core_var list         (* variables *)
+                * core_cvar list        (* constructors *)
+                * (core_con * int) list (* type constructors & arities *)
+                * (string * ctx) list   (* modules *)
+let empty_ctx = Ctx ([], [], [], [])
 let lookup : string -> ctx -> core_var option =
-  fun name (Ctx (vars, _, _)) ->
+  fun name (Ctx (vars, _, _, _)) ->
     List.find_opt (fun (Binding (name', _, _, _)) -> name = name') vars
 let lookup_con : string -> ctx -> core_cvar option =
-  fun name (Ctx (_, cvars, _)) ->
+  fun name (Ctx (_, cvars, _, _)) ->
     List.find_opt (fun (CBinding (name', _, _, _, _)) -> name = name') cvars
+let lookup_ty : string -> ctx -> (core_con * int) option =
+  fun name (Ctx (_, _, cons, _)) ->
+    List.find_opt (fun (CCon (name', _), _) -> name = name') cons
 let extend : ctx -> core_var -> ctx =
-  fun (Ctx (vars, cvars, modules)) v -> Ctx (v :: vars, cvars, modules)
+  fun (Ctx (vars, cvars, cons, modules)) v -> Ctx (v :: vars, cvars, cons, modules)
 let extend_con : ctx -> core_cvar -> ctx =
-  fun (Ctx (vars, cvars, modules)) cv -> Ctx (vars, cv :: cvars, modules)
+  fun (Ctx (vars, cvars, cons, modules)) cv -> Ctx (vars, cv :: cvars, cons, modules)
+let extend_ty : ctx -> (core_con * int) -> ctx =
+  fun (Ctx (vars, cvars, cons, modules)) con -> Ctx (vars, cvars, con :: cons, modules)
 let extend_mod : ctx -> (string * ctx) -> ctx =
-  fun (Ctx (vars, cvars, modules)) m -> Ctx (vars, cvars, m :: modules)
+  fun (Ctx (vars, cvars, cons, modules)) m -> Ctx (vars, cvars, cons, m :: modules)
 let extend_open : ctx -> string -> ctx option =
-  fun (Ctx (vars, cvars, modules)) name ->
+  fun (Ctx (vars, cvars, cons, modules)) name ->
     match List.find_opt (fun (name', _) -> name = name') modules with
     | None -> None
-    | Some (_, Ctx (vars', cvars', modules')) ->
-      Some (Ctx (vars' @ vars, cvars' @ cvars, modules' @ modules))
+    | Some (_, Ctx (vars', cvars', cons', modules')) ->
+      Some (Ctx (vars' @ vars, cvars' @ cvars, cons' @ cons, modules' @ modules))
 
-let c_arrow  = CCon ("->",     0)
-let c_tuple  = CCon ("*",      1)
-let c_char   = CCon ("char",   2)
-let c_int    = CCon ("int",    3)
-let c_string = CCon ("string", 4)
-let c_bool   = CCon ("bool",   5)
-let c_bool   = CCon ("string", 6)
-let c_option = CCon ("option", 7)
-let c_list   = CCon ("list",   8)
-
-let initial_ctx (next_var_id : unit -> core_var_id) =
-  let (-->) t1 t2 = CTCon (c_arrow, (t1 :: t2 :: [])) in
-  let t_char     = CTCon (c_char,   []) in
-  let t_int      = CTCon (c_int,    []) in
-  let t_string   = CTCon (c_string, []) in
-  let t_bool     = CTCon (c_bool,   []) in
-  let t_option t = CTCon (c_option, t :: []) in
-  let t_list   t = CTCon (c_list,   t :: []) in
+let initial_ctx
+  (next_var_id : unit -> core_var_id)
+  (next_con_id : unit -> core_con_id)
+=
   (* it's okay to reuse QVars for multiple variables here -
      they have the same ID, but this is only used to distinguish
      them during instantiation *)
@@ -986,12 +978,25 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
     let add_con name qvars params result =
       ctx := extend_con (deref ctx) (CBinding (name, next_var_id (), qvars, params, result))
     in
+    let add_ty name arity =
+      let con = CCon (name, next_con_id ()) in
+      (ctx := extend_ty (deref ctx) (con, arity); con)
+    in
     let add_mod name m =
       ctx := extend_mod (deref ctx) (name, m)
     in
-    (callback add add_con add_mod; deref ctx)
+    (callback add add_con add_ty add_mod; deref ctx)
   in
-  mk_ctx (fun add add_con add_mod ->
+  mk_ctx (fun add add_con add_ty add_mod ->
+    let ty0 name = CTCon (add_ty name 0, [])
+    and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
+    and ty2 name = let c = add_ty name 2 in fun a b -> CTCon (c, a :: b :: [])
+    in
+    let (-->) = ty2 "->"
+    and t_tuple = add_ty "*" (-1) (* TODO: this feels janky? *)
+    and t_char = ty0 "char" and t_int = ty0 "int"
+    and t_string = ty0 "string" and t_bool = ty0 "bool"
+    in
     add "&&" [] (t_bool --> (t_bool --> t_bool));
     add "||" [] (t_bool --> (t_bool --> t_bool));
     add "+"  [] (t_int --> (t_int --> t_int));
@@ -1004,14 +1009,16 @@ let initial_ctx (next_var_id : unit -> core_var_id) =
     add "="  qa (a --> (a --> t_bool));
     add_con "true"  [] [] t_bool;
     add_con "false" [] [] t_bool;
-    add_mod "String" (mk_ctx (fun add _ _ ->
+    add_mod "String" (mk_ctx (fun add _ _ _ ->
       add "length" [] (t_string --> t_int);
       add "get"    [] (t_string --> (t_int --> t_char));
       add "sub"    [] (t_string --> (t_int --> (t_int --> t_string)));
       ()
     ));
+    let t_option = ty1 "option" in
     add_con "None" qa [] (t_option a);
     add_con "Some" qa (a :: []) (t_option a);
+    let t_list = ty1 "list" in
     add "::" qa (a --> (t_list a --> t_list a));
     ()
   )
@@ -1049,8 +1056,31 @@ let preprocess_constructor_args
   Ok (cv, param_tys, result_ty, args)
 
 let elab (ast : ast) : (core, string) result =
-  let next_var_id = counter () in
-  let next_uvar_name = counter () in
+  let next_var_id = counter ()
+  and next_uvar_name = counter ()
+  and next_con_id = counter ()
+  in
+  let initial_ctx = initial_ctx next_var_id next_con_id in
+  let (ty0, ty1, ty2) =
+    let expect_arity n name =
+      match lookup_ty name initial_ctx with
+      | Some (c, arity) ->
+        if arity = n then c
+        else invalid_arg ("impossible: expected arity " ^ string_of_int n)
+      | None -> invalid_arg ("impossible: no such type " ^ name)
+    in
+    ((fun name -> let c = expect_arity 0 name in            CTCon (c, [])),
+     (fun name -> let c = expect_arity 1 name in fun a   -> CTCon (c, a :: [])),
+     (fun name -> let c = expect_arity 2 name in fun a b -> CTCon (c, a :: b :: [])))
+  in
+  let (-->)    = ty2 "->"
+  and t_tuple  = let c = fst (Option.get (lookup_ty "*" initial_ctx)) in
+                 fun args -> CTCon (c, args)
+  and t_char   = ty0 "char"
+  and t_int    = ty0 "int"
+  and t_string = ty0 "string"
+  and t_bool   = ty0 "bool"
+  in
   let new_uvar lvl name () : core_uvar ref =
     let id = next_uvar_name () in
     let name = match name with
@@ -1158,9 +1188,9 @@ let elab (ast : ast) : (core, string) result =
         let* () = unify_all param_tys (List.map snd args') in
         let args' = List.map fst args' in
         Ok (PCon (cv, Some args'), ground result_ty)
-      | PCharLit c   -> Ok (PCharLit c, CTCon (c_char, []))
-      | PIntLit c    -> Ok (PIntLit c, CTCon (c_int, []))
-      | PStrLit c    -> Ok (PStrLit c, CTCon (c_string, []))
+      | PCharLit c   -> Ok (PCharLit c, t_char)
+      | PIntLit c    -> Ok (PIntLit c, t_int)
+      | PStrLit c    -> Ok (PStrLit c, t_string)
       | PVar s       -> (match map_lookup s bindings with
                          | None   -> Error "impossible: we should have created suitable bindings?"
                          | Some v -> let Binding (_, _, _, ty) = v in
@@ -1186,7 +1216,7 @@ let elab (ast : ast) : (core, string) result =
     | Tuple es ->
       let* elab = map_m error_monad (infer lvl ctx) es in
       Ok (Tuple (List.map fst elab),
-          CTCon (c_tuple, List.map snd elab))
+          t_tuple (List.map snd elab))
     | List es ->
       let ty_elem = CUVar (new_uvar lvl None ()) in
       map_m error_monad (fun e ->
@@ -1204,9 +1234,9 @@ let elab (ast : ast) : (core, string) result =
       let* () = unify_all param_tys (List.map snd args') in
       let args' = List.map fst args' in
       Ok (Con (cv, Some args'), ground result_ty)
-    | CharLit c -> Ok (CharLit c, CTCon (c_char, []))
-    | IntLit i -> Ok (IntLit i, CTCon (c_int, []))
-    | StrLit s -> Ok (StrLit s, CTCon (c_string, []))
+    | CharLit c -> Ok (CharLit c, t_char)
+    | IntLit i -> Ok (IntLit i, t_int)
+    | StrLit s -> Ok (StrLit s, t_string)
     | Var s -> (match lookup s ctx with
                 | None -> Error ("variable not in scope: " ^ s)
                 | Some v ->
@@ -1222,7 +1252,7 @@ let elab (ast : ast) : (core, string) result =
       let* (e2', ty_arg) = infer lvl ctx e2 in
       let uv = new_uvar lvl None () in
       let ty_res = CUVar uv in
-      let* () = unify ty_fun (CTCon (c_arrow, (ty_arg :: ty_res :: []))) in
+      let* () = unify ty_fun (ty_arg --> ty_res) in
       Ok (App (e1', e2'), ground ty_res)
     | LetIn (bindings, e) ->
       let* (ctx', bindings') = infer_bindings lvl ctx bindings in
@@ -1246,18 +1276,18 @@ let elab (ast : ast) : (core, string) result =
         ground ty_res
       )
     | IfThenElse (e1, e2, e3) ->
-      let* (e1', ty_cond) = infer lvl ctx e1                   in
-      let* ()             = unify ty_cond (CTCon (c_bool, [])) in
-      let* (e2', ty_then) = infer lvl ctx e2                   in
-      let* (e3', ty_else) = infer lvl ctx e3                   in
-      let* ()             = unify ty_then ty_else              in
+      let* (e1', ty_cond) = infer lvl ctx e1      in
+      let* ()             = unify ty_cond t_bool  in
+      let* (e2', ty_then) = infer lvl ctx e2      in
+      let* (e3', ty_else) = infer lvl ctx e3      in
+      let* ()             = unify ty_then ty_else in
       Ok (IfThenElse (e1', e2', e3'), ground ty_then)
     | Fun (pats, e) ->
       let* (ctx', pats') = infer_pats lvl ctx pats in
       let* (e', ty_res) = infer lvl ctx' e in
       Ok (
         Fun (List.map fst pats', e'),
-        List.fold_right (fun (_, ty1) ty2 -> CTCon (c_arrow, ty1 :: ty2 :: [])) pats' ty_res
+        List.fold_right (fun (_, ty1) ty2 -> (ty1 --> ty2)) pats' ty_res
       )
   and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings, string) result =
     fun ctx (Bindings (is_rec, bindings)) ->
@@ -1298,7 +1328,7 @@ let elab (ast : ast) : (core, string) result =
           let* (rhs', ty_rhs)     = infer      (lvl + 1) ctx_inner rhs          in
           let* ()                 =
             unify ty_head (List.fold_right
-                            (fun (_, ty1) ty2 -> CTCon (c_arrow, ty1 :: ty2 :: []))
+                            (fun (_, ty1) ty2 -> (ty1 --> ty2))
                             args' ty_rhs)
           in
           let args' = List.map fst args' in
@@ -1363,7 +1393,7 @@ let elab (ast : ast) : (core, string) result =
           | Let bindings -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings in
                             Ok (ctx, Let bindings')
           | _            -> Error "TODO: this type of binding is not yet supported"
-        ) ast (initial_ctx next_var_id)
+        ) ast initial_ctx
   in Ok ast'
 
 let text =
