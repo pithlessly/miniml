@@ -1293,6 +1293,10 @@ let elab (ast : ast) : (core, string) result =
                         let* (p2', ty2) = go p2 in
                         let* () = unify ty1 ty2 in
                         Ok (POr (p1', p2'), ty1)
+      | PTuple ps ->
+        let* ps' = map_m error_monad go ps in
+        Ok (PTuple (List.map fst ps'),
+            t_tuple (List.map snd ps'))
       | PCon (name, args) ->
         let* (cv, param_tys, result_ty, args) =
           preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
@@ -1321,7 +1325,7 @@ let elab (ast : ast) : (core, string) result =
                         Ok (p', ty')
       | PWild        -> let ty = CUVar (new_uvar lvl None ()) in
                         Ok (PWild, ty)
-      (* TODO: implement PTuple, PList *)
+      (* TODO: implement PList *)
     in go
   in
   let infer_pat lvl : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
