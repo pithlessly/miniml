@@ -1136,6 +1136,73 @@ let elab (ast : ast) : (core, string) result =
               subst (List.map2 (fun p a -> (p, a)) params args') definition
     in go
   in
+  let translate_ast_typ_decl : (string list * string * ast_typ_decl) list ->
+                               ctx -> (ctx, string) result =
+    (* we process a group of type declarations in several stages, to avoid
+       creating cyclic type aliases:
+       - extend the context with all the *declarations* of ADTs simultaneously;
+       - traverse the type aliases serially, processing each's body in the
+         current context and then extending the context;
+       - extend the context with the constructors of all ADTs. *)
+    fun decls ctx ->
+    let* ((add_adts    : ctx -> (ctx, string) result),
+          (add_aliases : ctx -> (ctx, string) result),
+          (add_conss   : ctx -> (ctx, string) result))
+    = fold_left_m error_monad (fun (add_adts, add_aliases, add_conss)
+                                   (ty_params, name, decl) ->
+        let arity = List.length ty_params in
+        let ty_params_qvs = List.map (fun s -> (s, QVar (s, next_var_id ()))) ty_params in
+        let* ty_params_map: core_type string_map =
+          fold_left_m error_monad (fun acc (s, qv) ->
+            match map_insert (s, CQVar qv) acc with
+            | Some map -> Ok map
+            | None -> Error ("type declaration " ^ name ^
+                             " has duplicate type parameter '" ^ s)
+          ) map_empty ty_params_qvs
+        in
+        let ty_params = List.map snd ty_params_qvs in
+        let* con = match lookup_ty name ctx with
+                   | Some _ -> (* this check is not strictly necessary *)
+                               Error ("duplicate type name: " ^ name)
+                   | None   -> Ok (CCon (name, next_con_id ()))
+        in
+        match decl with
+        | Datatype constructors ->
+          (* step 1 *)
+          let add_adts' ctx =
+            let* ctx = add_adts ctx in
+            Ok (extend_ty ctx (CDatatype (con, arity)))
+          in
+          (* step 3 *)
+          let return_type = CTCon (con, List.map (fun qv -> CQVar qv) ty_params) in
+          let add_conss' ctx =
+            let* ctx = add_conss ctx in
+            fold_left_m error_monad (fun ctx (name, param_tys) ->
+              let* param_tys' = map_m error_monad (translate_ast_typ ctx ty_params_map)
+                                                  param_tys
+              in Ok (extend_con ctx (
+                CBinding (name,
+                          next_var_id (),
+                          ty_params,
+                          param_tys',
+                          return_type)))
+            ) ctx constructors
+          in Ok (add_adts', add_aliases, add_conss')
+        | Alias ty ->
+          (* step 2 *)
+          let add_aliases' ctx =
+            let* ctx = add_aliases ctx in
+            let* ty' = translate_ast_typ ctx ty_params_map ty in
+            Ok (extend_ty ctx (
+              CAlias (con,
+                      next_var_id (),
+                      ty_params,
+                      ty')))
+          in Ok (add_adts, add_aliases', add_conss)
+      ) ((fun c -> Ok c), (fun c -> Ok c), (fun c -> Ok c)) decls
+    in
+    add_adts ctx >>= add_aliases >>= add_conss
+  in
   let generalize (lvl : core_level) : core_type list -> core_qvar list * core_type list =
     (* TODO: we don't need to return a new type list here *)
     let rec go ty qvars =
@@ -1451,10 +1518,12 @@ let elab (ast : ast) : (core, string) result =
     map_m error_state_monad
         (fun decl ctx ->
           match decl with
-          | Let bindings -> infer_bindings (* lvl = *) 0 ctx bindings
-          | _            -> Error "TODO: this type of binding is not yet supported"
+          | Let bindings -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings
+                            in Ok (ctx, bindings' :: [])
+          | Types decls  -> let* ctx = translate_ast_typ_decl decls ctx
+                            in Ok (ctx, [])
         ) ast initial_ctx
-  in Ok ast'
+  in Ok (List.concat ast')
 
 let text =
   let f = In_channel.open_text "scratchpad.mini-ml" in
