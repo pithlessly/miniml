@@ -126,9 +126,6 @@ let lex str =
   in
   go 0 []
 
-type ('var, 'con, 'ty) typ_decl =
-                               | Datatype of (string * 'ty list) list
-                               | Alias    of 'ty
 type ('var, 'con, 'ty) pat =
                                | POr      of ('var, 'con, 'ty) pat
                                            * ('var, 'con, 'ty) pat
@@ -174,12 +171,6 @@ and  ('var, 'con, 'ty) expr =
                                | Fun        of ('var, 'con, 'ty) pat list
                                              * ('var, 'con, 'ty) expr
 and mod_expr =                 | Module of string
-type ('var, 'con, 'ty) decl =
-                               | Let      of ('var, 'con, 'ty) bindings
-                               | Types    of ( string list
-                                             * string
-                                             * ('var, 'con, 'ty) typ_decl
-                                             ) list
 
 type ast_typ = | TVar of string
                | TCon of string * ast_typ list
@@ -187,8 +178,13 @@ type ast_pat = (string, string, ast_typ) pat
 type ast_binding = (string, string, ast_typ) binding
 type ast_bindings = (string, string, ast_typ) bindings
 type ast_expr = (string, string, ast_typ) expr
-type ast_typ_decl = (string, string, ast_typ) typ_decl
-type ast_decl = (string, string, ast_typ) decl
+type ast_typ_decl = | Datatype of (string * ast_typ list) list
+                    | Alias    of ast_typ
+type ast_decl     = | Let      of ast_bindings
+                    | Types    of ( string list
+                                  * string
+                                  * ast_typ_decl
+                                  ) list
 type ast = ast_decl list
 
 (* parser combinators *)
@@ -723,9 +719,7 @@ type core_pat = (core_var, core_cvar, unit) pat
 type core_binding = (core_var, core_cvar, unit) binding
 type core_bindings = (core_var, core_cvar, unit) bindings
 type core_expr = (core_var, core_cvar, unit) expr
-type core_typ_decl = (core_var, core_cvar, unit) typ_decl
-type core_decl = (core_var, core_cvar, unit) decl
-type core = core_decl list
+type core = core_bindings list
 
 (* some helpers *)
 let map_m
@@ -1431,8 +1425,7 @@ let elab (ast : ast) : (core, string) result =
     map_m error_state_monad
         (fun decl ctx ->
           match decl with
-          | Let bindings -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings in
-                            Ok (ctx, Let bindings')
+          | Let bindings -> infer_bindings (* lvl = *) 0 ctx bindings
           | _            -> Error "TODO: this type of binding is not yet supported"
         ) ast initial_ctx
   in Ok ast'
