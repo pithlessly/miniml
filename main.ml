@@ -1125,7 +1125,7 @@ let elab (ast : ast) : (core, string) result =
         | None -> Error ("type constructor not in scope: " ^ name)
         | Some decl ->
           let (CDatatype (con, arity) | CAlias (con, arity, _, _)) = decl in
-          if arity <> List.length args then
+          if arity <> List.length args && arity >= 0 then
             Error ("type constructor " ^ name ^ " expects " ^
                    string_of_int arity ^ " argument(s)")
           else
