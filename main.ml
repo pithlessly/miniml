@@ -1195,7 +1195,7 @@ let elab (ast : ast) : (core, string) result =
             let* ty' = translate_ast_typ ctx ty_params_map ty in
             Ok (extend_ty ctx (
               CAlias (con,
-                      next_var_id (),
+                      arity,
                       ty_params,
                       ty')))
           in Ok (add_adts, add_aliases', add_conss)
