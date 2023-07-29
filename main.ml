@@ -719,6 +719,10 @@ type core_pat = (core_var, core_cvar, unit) pat
 type core_binding = (core_var, core_cvar, unit) binding
 type core_bindings = (core_var, core_cvar, unit) bindings
 type core_expr = (core_var, core_cvar, unit) expr
+type core_tydecl = | CDatatype of core_con * int (* arity *)
+                   | CAlias    of core_con * int (* name and arity *)
+                                * core_qvar list (* parameters *)
+                                * core_type      (* definition *)
 type core = core_bindings list
 
 (* some helpers *)
@@ -927,7 +931,7 @@ and unify_all : core_type list -> core_type list -> (unit, string) result = fun 
 
 type ctx = Ctx of core_var list         (* variables *)
                 * core_cvar list        (* constructors *)
-                * (core_con * int) list (* type constructors & arities *)
+                * core_tydecl list      (* type declarations *)
                 * (string * ctx) list   (* modules *)
 let empty_ctx = Ctx ([], [], [], [])
 let lookup : string -> ctx -> core_var option =
@@ -936,14 +940,16 @@ let lookup : string -> ctx -> core_var option =
 let lookup_con : string -> ctx -> core_cvar option =
   fun name (Ctx (_, cvars, _, _)) ->
     List.find_opt (fun (CBinding (name', _, _, _, _)) -> name = name') cvars
-let lookup_ty : string -> ctx -> (core_con * int) option =
+let lookup_ty : string -> ctx -> core_tydecl option =
   fun name (Ctx (_, _, cons, _)) ->
-    List.find_opt (fun (CCon (name', _), _) -> name = name') cons
+    List.find_opt (fun (CDatatype (CCon (name', _), _) |
+                        CAlias    (CCon (name', _), _, _, _)) ->
+                     name = name') cons
 let extend : ctx -> core_var -> ctx =
   fun (Ctx (vars, cvars, cons, modules)) v -> Ctx (v :: vars, cvars, cons, modules)
 let extend_con : ctx -> core_cvar -> ctx =
   fun (Ctx (vars, cvars, cons, modules)) cv -> Ctx (vars, cv :: cvars, cons, modules)
-let extend_ty : ctx -> (core_con * int) -> ctx =
+let extend_ty : ctx -> core_tydecl -> ctx =
   fun (Ctx (vars, cvars, cons, modules)) con -> Ctx (vars, cvars, con :: cons, modules)
 let extend_mod : ctx -> (string * ctx) -> ctx =
   fun (Ctx (vars, cvars, cons, modules)) m -> Ctx (vars, cvars, cons, m :: modules)
@@ -974,7 +980,7 @@ let initial_ctx
     in
     let add_ty name arity =
       let con = CCon (name, next_con_id ()) in
-      (ctx := extend_ty (deref ctx) (con, arity); con)
+      (ctx := extend_ty (deref ctx) (CDatatype (con, arity)); con)
     in
     let add_mod name m =
       ctx := extend_mod (deref ctx) (name, m)
@@ -1058,9 +1064,10 @@ let elab (ast : ast) : (core, string) result =
   let (ty0, ty1, ty2) =
     let expect_arity n name =
       match lookup_ty name initial_ctx with
-      | Some (c, arity) ->
+      | Some (CDatatype (c, arity)) ->
         if arity = n then c
         else invalid_arg ("impossible: expected arity " ^ string_of_int n)
+      | Some _ -> invalid_arg ("impossible: type " ^ name ^ " is not a datatype")
       | None -> invalid_arg ("impossible: no such type " ^ name)
     in
     ((fun name -> let c = expect_arity 0 name in            CTCon (c, [])),
@@ -1068,8 +1075,9 @@ let elab (ast : ast) : (core, string) result =
      (fun name -> let c = expect_arity 2 name in fun a b -> CTCon (c, a :: b :: [])))
   in
   let (-->)    = ty2 "->"
-  and t_tuple  = let c = fst (Option.get (lookup_ty "*" initial_ctx)) in
-                 fun args -> CTCon (c, args)
+  and t_tuple  = match lookup_ty "*" initial_ctx with
+                 | Some (CDatatype (c, _)) -> fun args -> CTCon (c, args)
+                 | _ -> invalid_arg "impossible"
   and t_char   = ty0 "char"
   and t_int    = ty0 "int"
   and t_string = ty0 "string"
@@ -1093,9 +1101,21 @@ let elab (ast : ast) : (core, string) result =
     and go_list acc types = List.fold_left go acc types
     in go_list map_empty
   in
-  let translate_ast_typ ctx (bindings : core_type string_map)
-                        : ast_typ -> (core_type, string) result =
-    let rec go typ =
+  let translate_ast_typ ctx : core_type string_map ->
+                              ast_typ -> (core_type, string) result =
+    (* substitute N types for N variables (QVars) in typ *)
+    let rec subst (rho : (core_qvar * core_type) list) typ =
+      match ground typ with
+      | CQVar (QVar (name, id)) ->
+        (match List.find_opt (fun (QVar (_, id'), _) -> id = id') rho with
+         | Some (_, ty) -> Ok ty
+         | None -> Error ("impossible: unknown qvar " ^ name ^ " while substituting"))
+      | CUVar _ -> Error "impossible: known types shouldn't have any unknown uvars?"
+      | CTCon (c, args) ->
+        let* args' = map_m error_monad (subst rho) args in
+        Ok (CTCon (c, args'))
+    in
+    let rec go bindings typ =
       match typ with
       | TVar s -> (match map_lookup s bindings with
                    | None -> Error "impossible: we should have created suitable bindings?"
@@ -1103,13 +1123,17 @@ let elab (ast : ast) : (core, string) result =
       | TCon (name, args) ->
         match lookup_ty name ctx with
         | None -> Error ("type constructor not in scope: " ^ name)
-        | Some (con, arity) ->
+        | Some decl ->
+          let (CDatatype (con, arity) | CAlias (con, arity, _, _)) = decl in
           if arity <> List.length args then
             Error ("type constructor " ^ name ^ " expects " ^
                    string_of_int arity ^ " argument(s)")
           else
-            let* args' = map_m error_monad go args in
-            Ok (CTCon (con, args'))
+            let* args' = map_m error_monad (go bindings) args in
+            match decl with
+            | CDatatype (_, _) -> Ok (CTCon (con, args'))
+            | CAlias (_, _, params, definition) ->
+              subst (List.map2 (fun p a -> (p, a)) params args') definition
     in go
   in
   let generalize (lvl : core_level) : core_type list -> core_qvar list * core_type list =
