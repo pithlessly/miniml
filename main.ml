@@ -1297,6 +1297,15 @@ let elab (ast : ast) : (core, string) result =
         let* ps' = map_m error_monad go ps in
         Ok (PTuple (List.map fst ps'),
             t_tuple (List.map snd ps'))
+      | PList ps ->
+        let ty_elem = CUVar (new_uvar lvl None ()) in
+        let* ps' = map_m error_monad
+                          (fun p ->
+                            let* (p', ty_p) = go p in
+                            let* () = unify ty_p ty_elem in
+                            Ok p'
+                          ) ps
+        in Ok (PList ps', ground ty_elem)
       | PCon (name, args) ->
         let* (cv, param_tys, result_ty, args) =
           preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
@@ -1325,7 +1334,6 @@ let elab (ast : ast) : (core, string) result =
                         Ok (p', ty')
       | PWild        -> let ty = CUVar (new_uvar lvl None ()) in
                         Ok (PWild, ty)
-      (* TODO: implement PList *)
     in go
   in
   let infer_pat lvl : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
@@ -1347,12 +1355,13 @@ let elab (ast : ast) : (core, string) result =
           t_tuple (List.map snd elab))
     | List es ->
       let ty_elem = CUVar (new_uvar lvl None ()) in
-      map_m error_monad (fun e ->
+      let* es' = map_m error_monad
+                        (fun e ->
                           let* (e', ty_e) = infer lvl ctx e in
                           let* () = unify ty_e ty_elem in
                           Ok e'
-                        ) es >>= fun es' ->
-        Ok (List es', ground ty_elem)
+                        ) es
+      in Ok (List es', ground ty_elem)
     | Con (name, args) ->
       let* (cv, param_tys, result_ty, args) =
         preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
