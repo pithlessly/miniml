@@ -1093,13 +1093,13 @@ let elab (ast : ast) : (core, string) result =
     and go_list acc types = List.fold_left go acc types
     in go_list map_empty
   in
-  let translate_ast_typ ctx (bindings : core_uvar ref string_map)
+  let translate_ast_typ ctx (bindings : core_type string_map)
                         : ast_typ -> (core_type, string) result =
     let rec go typ =
       match typ with
       | TVar s -> (match map_lookup s bindings with
                    | None -> Error "impossible: we should have created suitable bindings?"
-                   | Some uv -> Ok (CUVar uv))
+                   | Some ty -> Ok ty)
       | TCon (name, args) ->
         match lookup_ty name ctx with
         | None -> Error ("type constructor not in scope: " ^ name)
@@ -1215,7 +1215,7 @@ let elab (ast : ast) : (core, string) result =
       | PIntLit c    -> Ok (PIntLit c, t_int)
       | PStrLit c    -> Ok (PStrLit c, t_string)
       | PVar s       -> (match map_lookup s bindings with
-                         | None   -> Error "impossible: we should have created suitable bindings?"
+                         | None   -> Error ("type variable not in scope: '" ^ s)
                          | Some v -> let Binding (_, _, _, ty) = v in
                                      Ok (PVar v, ty))
       | PAsc (p, ty) -> let* (p', ty1) = go p in
@@ -1223,7 +1223,8 @@ let elab (ast : ast) : (core, string) result =
                         in every ascription are not related to each other, even though
                         they should be *)
                         let tyvars = ast_typ_bound_vars [ty] in
-                        let tyvars = map_map (fun s () -> new_uvar lvl (Some s) ()) tyvars in
+                        let tyvars = map_map (fun s () -> CUVar (new_uvar lvl (Some s) ()))
+                                             tyvars in
                         let* ty' = translate_ast_typ ctx tyvars ty in
                         let* () = unify ty1 ty' in
                         Ok (p', ty')
@@ -1357,7 +1358,8 @@ let elab (ast : ast) : (core, string) result =
             match annot with
             | None    -> Ok ()
             | Some ty -> let tyvars = ast_typ_bound_vars [ty] in
-                         let tyvars = map_map (fun s () -> new_uvar (lvl + 1) (Some s) ()) tyvars in
+                         let tyvars = map_map (fun s () -> CUVar (new_uvar (lvl + 1) (Some s) ()))
+                                              tyvars in
                          let* ty' = translate_ast_typ ctx tyvars ty in
                          unify ty_rhs ty'
           in
