@@ -172,6 +172,20 @@ and  ('var, 'con, 'ty) expr =
                                              * ('var, 'con, 'ty) expr
 and mod_expr =                 | Module of string
 
+let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
+  (* TODO: the real value restriction is smarter *)
+  let rec go_expr e =
+    match e with
+    | Fun (_, _) -> false
+    | LetIn (Bindings (_, bs), e) ->
+      List.fold_left (fun acc b -> acc || go b) false bs
+      || go_expr e
+    | _ -> true
+  and go (_, args, _, e) = match args with
+                           | _ :: _ -> false
+                           | []     -> go_expr e
+  in go
+
 type ast_typ = | TVar of string
                | TCon of string * ast_typ list
 type ast_pat = (string, string, ast_typ) pat
@@ -1454,7 +1468,8 @@ let elab (ast : ast) : (core, string) result =
     (* infer each binding *)
     let* bindings =
       map_m error_monad
-        (fun (bound_vars, (head, args, annot, rhs)) ->
+        (fun (bound_vars, binding) ->
+          let (head, args, annot, rhs) = binding in
           let* (head', ty_head)   = infer_pat_with_vars lvl ctx bound_vars head in
           let* (ctx_inner, args') = infer_pats (lvl + 1) ctx_inner args         in
           let* (rhs', ty_rhs)     = infer      (lvl + 1) ctx_inner rhs          in
@@ -1475,13 +1490,12 @@ let elab (ast : ast) : (core, string) result =
           let args' = List.map fst args' in
           let* can_generalize =
             (* TODO: the value restriction is a little looser than this *)
-            match (args, rhs) with
-            | (_ :: _, _)      -> Ok true
-            | ([], Fun (_, _)) -> Ok true
-            | _                -> if is_rec then
-                                    Error "recursive bindings cannot have side effects"
-                                  else
-                                    Ok false
+            if not (could_have_side_effects binding) then
+              Ok true
+            else if is_rec then
+              Error "recursive bindings cannot have side effects"
+            else
+              Ok false
           in
           Ok (bound_vars, can_generalize, ((head', args', None, rhs') : core_binding))
         ) bindings
