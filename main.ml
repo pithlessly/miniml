@@ -21,9 +21,9 @@ type token =
   | IdentUpper of string
   | IdentSymbol of string
   | IdentQuote of string
-  | CharLit of char
-  | IntLit of int
-  | StrLit of string
+  | TkCharLit of char
+  | TkIntLit of int
+  | TkStrLit of string
 
 let lex str =
   (* character properties *)
@@ -54,7 +54,7 @@ let lex str =
       let rec scan i parts escaped =
         match (char i, escaped) with
         | (None, _) -> Error "expected trailing quote for string literal, got EOF"
-        | (Some '"',  false) -> Ok (i + 1, StrLit (String.concat "" (List.rev parts)))
+        | (Some '"',  false) -> Ok (i + 1, TkStrLit (String.concat "" (List.rev parts)))
         | (Some '\\', false) -> scan (i + 1) parts true
         | (Some c,    false) -> scan (i + 1) (String.make 1 c :: parts) false
         | (Some '"',  true)  -> scan (i + 1) ("\"" :: parts) false
@@ -68,7 +68,7 @@ let lex str =
       let char_done c i =
         match char i with
         | None -> Error "expected trailing quote for character literal, got EOF"
-        | Some '\'' -> go (i + 1) (CharLit c :: tokens)
+        | Some '\'' -> go (i + 1) (TkCharLit c :: tokens)
         | Some _ -> if lower c then take_range 1 ident (fun s -> IdentQuote s)
                     else Error "unterminated character literal"
       in
@@ -118,7 +118,7 @@ let lex str =
       in
       if upper c then take_range 0 ident (fun s -> IdentUpper s) else
       if lower c then take_range 0 ident mk_lower_ident else
-      if numer c then take_range 0 numer (fun s -> IntLit (int_of_string s)) else
+      if numer c then take_range 0 numer (fun s -> TkIntLit (int_of_string s)) else
       if symbolic c then take_range 0 symbolic mk_symbolic_ident else
         Error ("unexpected character: " ^ String.make 1 c
                ^ " at position: " ^ string_of_int i)
@@ -428,9 +428,9 @@ let parse: token list -> (ast, string) result =
     match input with
     | KTrue        :: input -> k input (Some (PCon ("true", None)))
     | KFalse       :: input -> k input (Some (PCon ("false", None)))
-    | CharLit c    :: input -> k input (Some (PCharLit c))
-    | IntLit i     :: input -> k input (Some (PIntLit i))
-    | StrLit s     :: input -> k input (Some (PStrLit s))
+    | TkCharLit c  :: input -> k input (Some (PCharLit c))
+    | TkIntLit i   :: input -> k input (Some (PIntLit i))
+    | TkStrLit s   :: input -> k input (Some (PStrLit s))
     | IdentLower s :: input -> k input (Some (PVar s))
     | KUnder       :: input -> k input (Some PWild)
     | OpenBracket :: CloseBracket
@@ -655,9 +655,9 @@ let parse: token list -> (ast, string) result =
         k input (Some (LetOpen (Module mod_name, sub_expr)))
       )
     | IdentUpper s :: input -> k input (Some (Con (s, None))) (* duplicated from expr2 *)
-    | CharLit c    :: input -> k input (Some (CharLit c))
-    | IntLit i     :: input -> k input (Some (IntLit i))
-    | StrLit s     :: input -> k input (Some (StrLit s))
+    | TkCharLit c  :: input -> k input (Some (CharLit c))
+    | TkIntLit i   :: input -> k input (Some (IntLit i))
+    | TkStrLit s   :: input -> k input (Some (StrLit s))
     | IdentLower s :: input -> k input (Some (Var s))
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (List []))
