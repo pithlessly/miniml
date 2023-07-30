@@ -982,8 +982,9 @@ let initial_ctx
      they have the same ID, but this is only used to distinguish
      them during instantiation *)
   let a = QVar ("a", next_var_id ()) in
-  let qa = a :: [] in
-  let a = CQVar a in
+  let qa  = a :: [] and a = CQVar a in
+  let b = QVar ("b", next_var_id ()) in
+  let qab = b :: qa and b = CQVar b in
   let rec mk_ctx callback =
     let ctx = ref empty_ctx in
     let add name qvars ty =
@@ -996,12 +997,16 @@ let initial_ctx
       let con = CCon (name, next_con_id ()) in
       (ctx := extend_ty (deref ctx) (CDatatype (con, arity)); con)
     in
+    let add_alias name def =
+      let con = CCon (name, next_con_id ()) in
+      (ctx := extend_ty (deref ctx) (CAlias (con, 0, [], def)); con)
+    in
     let add_mod name m =
       ctx := extend_mod (deref ctx) (name, m)
     in
-    (callback add add_con add_ty add_mod; deref ctx)
+    (callback add add_con add_ty add_alias add_mod; deref ctx)
   in
-  mk_ctx (fun add add_con add_ty add_mod ->
+  mk_ctx (fun add add_con add_ty add_alias add_mod ->
     let ty0 name = CTCon (add_ty name 0, [])
     and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
     and ty2 name = let c = add_ty name 2 in fun a b -> CTCon (c, a :: b :: [])
@@ -1011,6 +1016,7 @@ let initial_ctx
     and t_char = ty0 "char" and t_int = ty0 "int"
     and t_string = ty0 "string" and t_bool = ty0 "bool"
     in
+    let t_unit = add_alias "unit" (CTCon (t_tuple, [])) in
     add "&&" [] (t_bool --> (t_bool --> t_bool));
     add "||" [] (t_bool --> (t_bool --> t_bool));
     add "+"  [] (t_int --> (t_int --> t_int));
@@ -1021,19 +1027,41 @@ let initial_ctx
     add "<"  qa (a --> (a --> t_bool));
     add ">"  qa (a --> (a --> t_bool));
     add "="  qa (a --> (a --> t_bool));
+    add "^"  [] (t_string --> (t_string --> t_string));
+    add "fst" qab (CTCon (t_tuple, a :: b :: []) --> a);
+    add "snd" qab (CTCon (t_tuple, a :: b :: []) --> b);
+    add "int_of_string" [] (t_string --> t_int);
+    add "string_of_int" [] (t_int --> t_string);
+    add "invalid_arg" qa (t_string --> a);
     add_con "true"  [] [] t_bool;
     add_con "false" [] [] t_bool;
-    add_mod "String" (mk_ctx (fun add _ _ _ ->
-      add "length" [] (t_string --> t_int);
-      add "get"    [] (t_string --> (t_int --> t_char));
-      add "sub"    [] (t_string --> (t_int --> (t_int --> t_string)));
-      ()
-    ));
+    let t_list = ty1 "list" in
+    add_con "::" qa (a :: t_list a :: []) (t_list a);
+    add     "::" qa (a --> (t_list a --> t_list a));
     let t_option = ty1 "option" in
     add_con "None" qa [] (t_option a);
     add_con "Some" qa (a :: []) (t_option a);
-    let t_list = ty1 "list" in
-    add "::" qa (a --> (t_list a --> t_list a));
+    let t_result = ty2 "result" in
+    add_con "Ok"    qab (a :: []) (t_result a b);
+    add_con "Error" qab (b :: []) (t_result a b);
+    add_mod "List" (mk_ctx (fun add _ _ _ _ ->
+      add "rev" qa (t_list a --> t_list a);
+      add "fold_left" qab ((a --> (b --> a)) --> (a --> (t_list b --> a)));
+      add "map" qab ((a --> b) --> (t_list a --> t_list b));
+      ()
+    ));
+    add_mod "String" (mk_ctx (fun add _ _ _ _ ->
+      add "length" [] (t_string --> t_int);
+      add "get"    [] (t_string --> (t_int --> t_char));
+      add "sub"    [] (t_string --> (t_int --> (t_int --> t_string)));
+      add "concat" [] (t_string --> (t_list t_string --> t_string));
+      add "make"   [] (t_int --> (t_char --> t_string));
+      ()
+    ));
+    add_mod "Fun" (mk_ctx (fun add _ _ _ _ ->
+      add "id" qa (a --> a);
+      ()
+    ));
     ()
   )
 
