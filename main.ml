@@ -1451,7 +1451,7 @@ let elab (ast : ast) : (core, string) result =
       map_m error_monad
         (fun binding ->
           let (head, _, _, _) = binding in
-          let* vars = pat_bound_vars lvl head in
+          let* vars = pat_bound_vars (lvl + 1) head in
           Ok (vars, binding)
         ) bindings
     in
@@ -1474,7 +1474,7 @@ let elab (ast : ast) : (core, string) result =
       map_m error_monad
         (fun (bound_vars, binding) ->
           let (head, args, annot, rhs) = binding in
-          let* (head', ty_head)   = infer_pat_with_vars lvl ctx bound_vars head in
+          let* (head', ty_head)   = infer_pat_with_vars (lvl + 1) ctx bound_vars head in
           let* (ctx_inner, args') = infer_pats (lvl + 1) ctx_inner args         in
           let* (rhs', ty_rhs)     = infer      (lvl + 1) ctx_inner rhs          in
           let* () =
