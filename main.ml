@@ -795,7 +795,7 @@ let show_ty : core_type -> string =
     | CUVar r -> (match deref r with
                   | Known ty -> go prec ty
                   | Unknown (s, _, lvl) ->
-                    fun acc -> s :: "(" :: string_of_int lvl :: ")" :: acc)
+                    fun acc -> ("?" ^ s ^ "(" ^ string_of_int lvl ^ ")") :: acc)
     | CTCon (CCon ("->", _), a :: b :: []) ->
       let a = go 1 a and b = go 0 b in
       wrap_if 0 (fun acc -> a (" -> " :: b acc))
