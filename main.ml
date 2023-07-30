@@ -1192,6 +1192,10 @@ let elab (ast : ast) : (core, string) result =
           let add_conss' ctx =
             let* ctx = add_conss ctx in
             fold_left_m error_monad (fun ctx (name, param_tys) ->
+              let* () = match lookup_con name ctx with
+                        | Some _ -> (* we don't yet know how to disambiguate *)
+                                    Error ("duplicate constructor name: " ^ name)
+                        | None   -> Ok () in
               let* param_tys' = map_m error_monad (translate_ast_typ ctx ty_params_map)
                                                   param_tys
               in Ok (extend_con ctx (
