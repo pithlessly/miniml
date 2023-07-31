@@ -176,7 +176,14 @@ let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
   (* TODO: the real value restriction is smarter *)
   let rec go_expr e =
     match e with
-    | Var _ -> false
+    | Tuple es
+    | List es
+    | Con (_, Some es) -> List.fold_left (fun acc e -> acc || go_expr e) false es
+    | Con (_, None)
+    | CharLit _
+    | IntLit _
+    | StrLit _
+    | Var _
     | Fun (_, _) -> false
     | LetIn (Bindings (_, bs), e) ->
       List.fold_left (fun acc b -> acc || go b) false bs
