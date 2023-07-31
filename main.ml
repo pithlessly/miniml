@@ -31,7 +31,7 @@ let lex str =
   let upper c = 'A' <= c && c <= 'Z' in
   let numer c = '0' <= c && c <= '9' in
   let ident c = upper c || lower c || numer c in
-  let symbolic c = match c with | '&' | '*' | '+' | '-' | '.' | ':'
+  let symbolic c = match c with | '!' | '&' | '*' | '+' | '-' | '.' | ':'
                                 | '<' | '>' | '=' | '^' | '|' | '@' -> true
                                 | _ -> false
   in
