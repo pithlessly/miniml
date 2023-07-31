@@ -1242,7 +1242,7 @@ let elab (ast : ast) : (core, string) result =
                                    (ty_params, name, decl) ->
         let arity = List.length ty_params in
         let ty_params_qvs = List.map (fun s -> (s, QVar (s, next_var_id ()))) ty_params in
-        let* ty_params_map: core_type string_map =
+        let* (ty_params_map : core_type string_map) =
           fold_left_m error_monad (fun acc (s, qv) ->
             match map_insert (s, CQVar qv) acc with
             | Some map -> Ok map
@@ -1321,7 +1321,7 @@ let elab (ast : ast) : (core, string) result =
     in fun tys -> go_list tys []
   in
   let instantiate lvl (qvars : core_qvar list) () : core_type -> core_type =
-    let qvars = List.map (fun var -> let QVar (name, _) = var in
+    let qvars = List.map (fun var -> let (QVar (name, _)) = var in
                                      (var, new_uvar lvl (Some name) ())) qvars in
     let rec go ty = match ty with
                     | CQVar (QVar (n, id)) -> (
@@ -1332,7 +1332,7 @@ let elab (ast : ast) : (core, string) result =
                     | CUVar r -> (
                       match deref r with
                       | Known ty -> go ty
-                      | Unknown _ -> ty)
+                      | Unknown (_, _, _) -> ty)
                     | CTCon (c, tys) -> CTCon (c, List.map go tys)
     in go
   in
@@ -1373,7 +1373,7 @@ let elab (ast : ast) : (core, string) result =
       | Error (DupErr v) -> Error "variable bound multiple times in the same pattern: v"
     in
     fun lvl pat ->
-      go pat >>= fun bindings ->
+      let* bindings = go pat in
       Ok (map_map
         (fun s () -> let uv = CUVar (new_uvar lvl (Some s) ()) in
                      Binding (s, next_var_id (), [], uv)
@@ -1414,13 +1414,13 @@ let elab (ast : ast) : (core, string) result =
       | PStrLit c    -> Ok (PStrLit c, t_string)
       | PVar s       -> (match map_lookup s bindings with
                          | None   -> Error ("type variable not in scope: '" ^ s)
-                         | Some v -> let Binding (_, _, _, ty) = v in
+                         | Some v -> let (Binding (_, _, _, ty)) = v in
                                      Ok (PVar v, ty))
       | PAsc (p, ty) -> let* (p', ty1) = go p in
                         (* TODO: in this implementation, the type variables introduced
                         in every ascription are not related to each other, even though
                         they should be *)
-                        let tyvars = ast_typ_bound_vars [ty] in
+                        let tyvars = ast_typ_bound_vars (ty :: []) in
                         let tyvars = map_map (fun s () -> CUVar (new_uvar lvl (Some s) ()))
                                              tyvars in
                         let* ty' = translate_ast_typ ctx tyvars ty in
@@ -1471,7 +1471,7 @@ let elab (ast : ast) : (core, string) result =
     | Var s -> (match lookup s ctx with
                 | None -> Error ("variable not in scope: " ^ s)
                 | Some v ->
-                  let Binding (_, _, qvars, ty) = v in
+                  let (Binding (_, _, qvars, ty)) = v in
                   let ty = instantiate lvl qvars () ty in
                   Ok (Var v, ty))
     | LetOpen (Module name, e) -> (
@@ -1556,7 +1556,7 @@ let elab (ast : ast) : (core, string) result =
           let* () =
             match annot with
             | None    -> Ok ()
-            | Some ty -> let tyvars = ast_typ_bound_vars [ty] in
+            | Some ty -> let tyvars = ast_typ_bound_vars (ty :: []) in
                          let tyvars = map_map (fun s () -> CUVar (new_uvar (lvl + 1) (Some s) ()))
                                               tyvars in
                          let* ty' = translate_ast_typ ctx tyvars ty in
@@ -1577,7 +1577,8 @@ let elab (ast : ast) : (core, string) result =
             else
               Ok false
           in
-          Ok (bound_vars, can_generalize, ((head', args', None, rhs') : core_binding))
+          (* TODO: support type ascriptions in expression position *)
+          Ok (bound_vars, can_generalize, ((head', args', None, rhs') (* : core_binding *)))
         ) bindings
     in
     let bound_vars : core_var list =
@@ -1598,7 +1599,7 @@ let elab (ast : ast) : (core, string) result =
         let types = List.map (fun (Binding (_, _, [], ty)) -> ty) bound_vars in
         let (qvars, types) = generalize lvl types in
         List.map2 (fun var ty ->
-          let Binding (name, id, _, _) = var in
+          let (Binding (name, id, _, _)) = var in
           (* NOTE: What's going on here? We are allocating a "new" variable,
           but giving it the same ID as the above. This is fine, because (since
           generalization mutates the types it encounters, replacing the uvars
