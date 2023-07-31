@@ -1019,7 +1019,7 @@ let initial_ctx
     in
     let add_alias name def =
       let con = CCon (name, next_con_id ()) in
-      (ctx := extend_ty (deref ctx) (CAlias (con, 0, [], def)); con)
+      (ctx := extend_ty (deref ctx) (CAlias (con, 0, [], def)); def)
     in
     let add_mod name m =
       ctx := extend_mod (deref ctx) (name, m)
@@ -1037,17 +1037,22 @@ let initial_ctx
     and t_string = ty0 "string" and t_bool = ty0 "bool"
     in
     let t_unit = add_alias "unit" (CTCon (t_tuple, [])) in
-    add "&&" [] (t_bool --> (t_bool --> t_bool));
-    add "||" [] (t_bool --> (t_bool --> t_bool));
-    add "+"  [] (t_int --> (t_int --> t_int));
-    add "-"  [] (t_int --> (t_int --> t_int));
+    add "&&"  [] (t_bool --> (t_bool --> t_bool));
+    add "||"  [] (t_bool --> (t_bool --> t_bool));
+    add "not" [] (t_bool --> t_bool);
+    add "+"   [] (t_int --> (t_int --> t_int));
+    add "-"   [] (t_int --> (t_int --> t_int));
     (* TODO: make ordered comparisons int-specific *)
-    add ">=" qa (a --> (a --> t_bool));
-    add "<=" qa (a --> (a --> t_bool));
-    add "<"  qa (a --> (a --> t_bool));
-    add ">"  qa (a --> (a --> t_bool));
-    add "="  qa (a --> (a --> t_bool));
-    add "^"  [] (t_string --> (t_string --> t_string));
+    add ">="  qa (a --> (a --> t_bool));
+    add "<="  qa (a --> (a --> t_bool));
+    add "<"   qa (a --> (a --> t_bool));
+    add ">"   qa (a --> (a --> t_bool));
+    add "="   qa (a --> (a --> t_bool));
+    add "<>"  qa (a --> (a --> t_bool));
+    add "=="  qa (a --> (a --> t_bool));
+    add "^"   [] (t_string --> (t_string --> t_string));
+    add ";"   qab (a --> (b --> b));
+    add "min" [] (t_int --> (t_int --> t_int));
     add "fst" qab (CTCon (t_tuple, a :: b :: []) --> a);
     add "snd" qab (CTCon (t_tuple, a :: b :: []) --> b);
     add "int_of_string" [] (t_string --> t_int);
@@ -1055,19 +1060,31 @@ let initial_ctx
     add "invalid_arg" qa (t_string --> a);
     add_con "true"  [] [] t_bool;
     add_con "false" [] [] t_bool;
-    let t_list = ty1 "list" in
+    (
+      let t_ref = ty1 "ref" in
+      add "ref" qa (a --> t_ref a);
+      add "!"   qa (t_ref a --> a);
+      add ":="  qa (t_ref a --> (a --> t_unit))
+    );
+    (* TODO: fix the parser so we can remove these parens *)
+    (let t_list = ty1 "list" in
     add_con "::" qa (a :: t_list a :: []) (t_list a);
     add     "::" qa (a --> (t_list a --> t_list a));
-    let t_option = ty1 "option" in
+    add     "@"  qa (t_list a --> (t_list a --> t_list a));
+    (let t_option = ty1 "option" in
     add_con "None" qa [] (t_option a);
     add_con "Some" qa (a :: []) (t_option a);
-    let t_result = ty2 "result" in
+    (let t_result = ty2 "result" in
     add_con "Ok"    qab (a :: []) (t_result a b);
     add_con "Error" qab (b :: []) (t_result a b);
     add_mod "List" (mk_ctx (fun add _ _ _ _ ->
       add "rev" qa (t_list a --> t_list a);
-      add "fold_left" qab ((a --> (b --> a)) --> (a --> (t_list b --> a)));
-      add "map" qab ((a --> b) --> (t_list a --> t_list b));
+      add "fold_left"  qab ((a --> (b --> a)) --> (a --> (t_list b --> a)));
+      add "fold_right" qab ((b --> (a --> a)) --> (t_list b --> (a --> a)));
+      add "map"        qab ((a --> b) --> (t_list a --> t_list b));
+      add "find_opt"   qa  ((a --> t_bool) --> (t_list a --> t_option a));
+      add "iter"       qa  ((a --> t_unit) --> (t_list a --> t_unit));
+      add "length"     qa  (t_list a --> t_int);
       ()
     ));
     add_mod "String" (mk_ctx (fun add _ _ _ _ ->
@@ -1082,7 +1099,11 @@ let initial_ctx
       add "id" qa (a --> a);
       ()
     ));
-    ()
+    add_mod "Option" (mk_ctx (fun add _ _ _ _ ->
+      add "map" qab ((a --> b) --> (t_option a --> t_option b));
+      ()
+    ));
+    ())))
   )
 
 let preprocess_constructor_args
