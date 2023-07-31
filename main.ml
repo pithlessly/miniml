@@ -1116,6 +1116,15 @@ let initial_ctx
       add "map" qab ((a --> b) --> (t_option a --> t_option b));
       ()
     ));
+    (
+      let t_in_channel = ty0 "in_channel" in
+      add_mod "In_channel" (mk_ctx (fun add _ _ _ _ ->
+        add "open_text" [] (t_string --> t_in_channel);
+        add "input_all" [] (t_in_channel --> t_string);
+        add "close"     [] (t_in_channel --> t_unit);
+        ()
+      ))
+    );
     ())))
   )
 
