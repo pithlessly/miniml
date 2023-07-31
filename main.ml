@@ -621,7 +621,7 @@ let parse: token list -> (ast, string) result =
         (* NOTE "constructor parsing hack":
            The reader might be wondering: "isn't it hacky to detect
            multi-argument constructors by just matching on whether the
-           argument is a tuple literal literal? After all, this would mean
+           argument is a tuple literal? After all, this would mean
            we would incorrectly parse something like `A ((1, 2))` as a
            two-argument constructor since parens are transparent to the
            AST."
