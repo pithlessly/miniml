@@ -662,6 +662,8 @@ let parse: token list -> (ast, string) result =
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (List []))
     | OpenBracket  :: _     -> Error "only empty list literals are supported"
+    | OpenParen :: IdentSymbol s :: CloseParen
+                   :: input -> k input (Some (Var s))
     | OpenParen :: CloseParen
                    :: input -> k input (Some (Tuple []))
     | OpenParen    :: input ->
