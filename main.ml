@@ -436,6 +436,8 @@ let parse: token list -> (ast, string) result =
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (PList []))
     | OpenBracket  :: _     -> Error "only empty list literals are supported"
+    | OpenParen :: KLet :: IdentSymbol s :: CloseParen
+                   :: input -> k input (Some (PVar ("let" ^ s)))
     | OpenParen :: IdentSymbol s :: CloseParen
                    :: input -> k input (Some (PVar s))
     | OpenParen :: CloseParen
@@ -514,6 +516,19 @@ let parse: token list -> (ast, string) result =
   (* parsing expressions *)
   let rec expr0 : ast_expr option parser = fun input k ->
     match input with
+    | KLet :: IdentSymbol s :: input ->
+      let p' =
+        seq (force "expected pattern" pattern3 @>
+             equal                             @>
+             force_expr                        @>
+             k_in                              @>
+             force_expr                        @>
+        fin (fun pat () rhs () rest -> Some (
+          App (App (Var ("let" ^ s), rhs),
+               Fun (pat :: [], rest))
+        )))
+      in
+      p' input k
     | KLet :: input ->
       let p' =
         seq (val_bindings  @>
@@ -662,6 +677,8 @@ let parse: token list -> (ast, string) result =
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (List []))
     | OpenBracket  :: _     -> Error "only empty list literals are supported"
+    | OpenParen :: KLet :: IdentSymbol s :: CloseParen
+                   :: input -> k input (Some (Var ("let" ^ s)))
     | OpenParen :: IdentSymbol s :: CloseParen
                    :: input -> k input (Some (Var s))
     | OpenParen :: CloseParen
