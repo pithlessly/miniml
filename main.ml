@@ -914,7 +914,7 @@ let rec occurs_check : core_uvar ref -> core_type -> (unit, string) result = fun
           match deref v with
           | Known _             -> ()
           | Unknown (_, _, lvl) ->
-            v' := Unknown (name', id', min lvl lvl');
+            v' := Unknown (name', id', min lvl lvl')
         )
 
 (* follow `Known`s until we get where we wanted *)
@@ -939,7 +939,7 @@ let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
   if t1 == t2 then Ok () else
   match (ground t1, ground t2) with
   | (CQVar qv, _) | (_, CQVar qv) ->
-    let QVar (name, a) = qv in
+    let (QVar (name, a)) = qv in
     Error ("found CQVar (" ^ name ^ " " ^ string_of_int a ^ ") - should be impossible")
   | (CUVar r, t') | (t', CUVar r) ->
     (* r must be Unknown *)
@@ -953,7 +953,7 @@ let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
       let* () = occurs_check r t' in
       Ok (r := Known t')
   | (CTCon (c1, p1), CTCon (c2, p2)) ->
-    let CCon (n1, id1) = c1 and CCon (n2, id2) = c2 in
+    let (CCon (n1, id1)) = c1 and (CCon (n2, id2)) = c2 in
     if id1 <> id2 then
       Error ("cannot unify different type constructors: " ^ n1 ^ " != " ^ n2)
     else unify_all p1 p2
@@ -963,10 +963,10 @@ and unify_all : core_type list -> core_type list -> (unit, string) result = fun 
   | (t1 :: ts1, t2 :: ts2) -> let* () = unify t1 t2 in unify_all ts1 ts2
   | _ -> Error "cannot unify different numbers of arguments"
 
-type ctx = Ctx of core_var list         (* variables *)
-                * core_cvar list        (* constructors *)
-                * core_tydecl list      (* type declarations *)
-                * (string * ctx) list   (* modules *)
+type ctx = | Ctx of core_var list         (* variables *)
+                  * core_cvar list        (* constructors *)
+                  * core_tydecl list      (* type declarations *)
+                  * (string * ctx) list   (* modules *)
 let empty_ctx = Ctx ([], [], [], [])
 let lookup : string -> ctx -> core_var option =
   fun name (Ctx (vars, _, _, _)) ->
@@ -1032,7 +1032,7 @@ let initial_ctx
     and ty2 name = let c = add_ty name 2 in fun a b -> CTCon (c, a :: b :: [])
     in
     let (-->) = ty2 "->"
-    and t_tuple = add_ty "*" (-1) (* TODO: this feels janky? *)
+    and t_tuple = add_ty "*" (0 - 1) (* TODO: this feels janky? *)
     and t_char = ty0 "char" and t_int = ty0 "int"
     and t_string = ty0 "string" and t_bool = ty0 "bool"
     in
@@ -1116,7 +1116,7 @@ let preprocess_constructor_args
     | None    -> Error ("constructor not in scope: " ^ name)
     | Some cv -> Ok cv
   in
-  let CBinding (_, _, qvars, param_tys, result_tys) = cv in
+  let (CBinding (_, _, qvars, param_tys, result_tys)) = cv in
   let instantiate = instantiate qvars () in
   let param_tys = List.map instantiate param_tys in
   let result_ty = instantiate result_tys in
