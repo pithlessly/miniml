@@ -1012,6 +1012,8 @@ let initial_ctx
   let qa  = a :: [] and a = CQVar a in
   let b = QVar ("b", next_var_id ()) in
   let qab = b :: qa and b = CQVar b in
+  let c = QVar ("c", next_var_id ()) in
+  let qabc = c :: qab and c = CQVar c in
   let rec mk_ctx callback =
     let ctx = ref empty_ctx in
     let add name qvars ty =
@@ -1064,6 +1066,7 @@ let initial_ctx
     add "snd" qab (CTCon (t_tuple, a :: b :: []) --> b);
     add "int_of_string" [] (t_string --> t_int);
     add "string_of_int" [] (t_int --> t_string);
+    add "print_endline" [] (t_string --> t_unit);
     add "invalid_arg" qa (t_string --> a);
     add_con "true"  [] [] t_bool;
     add_con "false" [] [] t_bool;
@@ -1086,12 +1089,14 @@ let initial_ctx
     add_con "Error" qab (b :: []) (t_result a b);
     add_mod "List" (mk_ctx (fun add _ _ _ _ ->
       add "rev" qa (t_list a --> t_list a);
-      add "fold_left"  qab ((a --> (b --> a)) --> (a --> (t_list b --> a)));
-      add "fold_right" qab ((b --> (a --> a)) --> (t_list b --> (a --> a)));
-      add "map"        qab ((a --> b) --> (t_list a --> t_list b));
-      add "find_opt"   qa  ((a --> t_bool) --> (t_list a --> t_option a));
-      add "iter"       qa  ((a --> t_unit) --> (t_list a --> t_unit));
-      add "length"     qa  (t_list a --> t_int);
+      add "fold_left"  qab  ((a --> (b --> a)) --> (a --> (t_list b --> a)));
+      add "fold_right" qab  ((b --> (a --> a)) --> (t_list b --> (a --> a)));
+      add "map"        qab  ((a --> b) --> (t_list a --> t_list b));
+      add "map2"       qabc ((a --> (b --> c)) --> (t_list a --> (t_list b --> t_list c)));
+      add "find_opt"   qa   ((a --> t_bool) --> (t_list a --> t_option a));
+      add "iter"       qa   ((a --> t_unit) --> (t_list a --> t_unit));
+      add "length"     qa   (t_list a --> t_int);
+      add "concat"     qa   (t_list (t_list a) --> t_list a);
       ()
     ));
     add_mod "String" (mk_ctx (fun add _ _ _ _ ->
@@ -1103,7 +1108,8 @@ let initial_ctx
       ()
     ));
     add_mod "Fun" (mk_ctx (fun add _ _ _ _ ->
-      add "id" qa (a --> a);
+      add "id"   qa   (a --> a);
+      add "flip" qabc ((a --> (b --> c)) --> (b --> (a --> c)));
       ()
     ));
     add_mod "Option" (mk_ctx (fun add _ _ _ _ ->
