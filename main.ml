@@ -747,11 +747,13 @@ and  core_uvar = | Unknown of string * core_var_id * core_level
 (* ordinary variable binding *)
 type core_var  = | Binding of string (* name in the syntax *)
                             * core_var_id (* numeric ID *)
+                            * bool        (* builtin? *)
                             * core_qvar list (* forall parameters *)
                             * core_type (* type *)
 (* constructor variable binding *)
 type core_cvar = | CBinding of string (* name in the syntax *)
                              * core_var_id (* numeric ID *)
+                             * bool        (* builtin? *)
                              * core_qvar list (* forall parameters *)
                              * core_type list (* parameter types *)
                              * core_type      (* return type *)
@@ -977,10 +979,10 @@ type ctx = | Ctx of core_var list         (* variables *)
 let empty_ctx = Ctx ([], [], [], [])
 let lookup : string -> ctx -> core_var option =
   fun name (Ctx (vars, _, _, _)) ->
-    List.find_opt (fun (Binding (name', _, _, _)) -> name = name') vars
+    List.find_opt (fun (Binding (name', _, _, _, _)) -> name = name') vars
 let lookup_con : string -> ctx -> core_cvar option =
   fun name (Ctx (_, cvars, _, _)) ->
-    List.find_opt (fun (CBinding (name', _, _, _, _)) -> name = name') cvars
+    List.find_opt (fun (CBinding (name', _, _, _, _, _)) -> name = name') cvars
 let lookup_ty : string -> ctx -> core_tydecl option =
   fun name (Ctx (_, _, cons, _)) ->
     List.find_opt (fun (CDatatype (CCon (name', _), _) |
@@ -1017,10 +1019,10 @@ let initial_ctx
   let rec mk_ctx callback =
     let ctx = ref empty_ctx in
     let add name qvars ty =
-      ctx := extend (deref ctx) (Binding (name, next_var_id (), qvars, ty))
+      ctx := extend (deref ctx) (Binding (name, next_var_id (), true, qvars, ty))
     in
     let add_con name qvars params result =
-      ctx := extend_con (deref ctx) (CBinding (name, next_var_id (), qvars, params, result))
+      ctx := extend_con (deref ctx) (CBinding (name, next_var_id (), true, qvars, params, result))
     in
     let add_ty name arity =
       let con = CCon (name, next_con_id ()) in
@@ -1138,7 +1140,7 @@ let preprocess_constructor_args
     | None    -> Error ("constructor not in scope: " ^ name)
     | Some cv -> Ok cv
   in
-  let (CBinding (_, _, qvars, param_tys, result_tys)) = cv in
+  let (CBinding (_, _, _, qvars, param_tys, result_tys)) = cv in
   let instantiate = instantiate qvars () in
   let param_tys = List.map instantiate param_tys in
   let result_ty = instantiate result_tys in
@@ -1292,6 +1294,7 @@ let elab (ast : ast) : (core, string) result =
               in Ok (extend_con ctx (
                 CBinding (name,
                           next_var_id (),
+                          false,
                           ty_params,
                           param_tys',
                           return_type)))
@@ -1391,7 +1394,7 @@ let elab (ast : ast) : (core, string) result =
       let* bindings = go pat in
       Ok (map_map
         (fun s () -> let uv = CUVar (new_uvar lvl (Some s) ()) in
-                     Binding (s, next_var_id (), [], uv)
+                     Binding (s, next_var_id (), false, [], uv)
         ) bindings)
   (* TODO: exhaustiveness checking? *)
   and infer_pat_with_vars lvl ctx (bindings : core_var string_map) :
@@ -1429,7 +1432,7 @@ let elab (ast : ast) : (core, string) result =
       | PStrLit c    -> Ok (PStrLit c, t_string)
       | PVar s       -> (match map_lookup s bindings with
                          | None   -> Error ("type variable not in scope: '" ^ s)
-                         | Some v -> let (Binding (_, _, _, ty)) = v in
+                         | Some v -> let (Binding (_, _, _, _, ty)) = v in
                                      Ok (PVar v, ty))
       | PAsc (p, ty) -> let* (p', ty1) = go p in
                         (* TODO: in this implementation, the type variables introduced
@@ -1486,7 +1489,7 @@ let elab (ast : ast) : (core, string) result =
     | Var s -> (match lookup s ctx with
                 | None -> Error ("variable not in scope: " ^ s)
                 | Some v ->
-                  let (Binding (_, _, qvars, ty)) = v in
+                  let (Binding (_, _, _, qvars, ty)) = v in
                   let ty = instantiate lvl qvars () ty in
                   Ok (Var v, ty))
     | LetOpen (Module name, e) -> (
@@ -1611,10 +1614,10 @@ let elab (ast : ast) : (core, string) result =
       if not can_generalize then
         bound_vars
       else
-        let types = List.map (fun (Binding (_, _, [], ty)) -> ty) bound_vars in
+        let types = List.map (fun (Binding (_, _, _, [], ty)) -> ty) bound_vars in
         let (qvars, types) = generalize lvl types in
         List.map2 (fun var ty ->
-          let (Binding (name, id, _, _)) = var in
+          let (Binding (name, id, _, _, _)) = var in
           (* NOTE: What's going on here? We are allocating a "new" variable,
           but giving it the same ID as the above. This is fine, because (since
           generalization mutates the types it encounters, replacing the uvars
@@ -1628,7 +1631,7 @@ let elab (ast : ast) : (core, string) result =
           However, this does feel a little inelegant, and it would be nice to
           avoid it, e.g. by making the qvar list in Binding be a ref. *)
           (* TODO: maybe trim the qvars to those which appear in the ty? *)
-          Binding (name, id, qvars, ty)
+          Binding (name, id, false, qvars, ty)
         ) bound_vars types
     in
     let bindings = List.map (fun (_, _, binding) -> binding) bindings in
