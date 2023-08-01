@@ -11,8 +11,9 @@ target:
 	mkdir -p target
 
 target/compiled.scm: target/main.exe scratchpad.mini-ml
-	$< > $@
+	$< > target/tmp.scm
+	cp target/tmp.scm $@
 
 .PHONY: run
-run: prelude.scm target/compiled.scm
+run: target/compiled.scm prelude.scm
 	$(SCHEME) $<
