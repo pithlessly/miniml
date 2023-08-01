@@ -59,6 +59,7 @@ let lex str =
         | (Some c,    false) -> scan (i + 1) (String.make 1 c :: parts) false
         | (Some '"',  true)  -> scan (i + 1) ("\"" :: parts) false
         | (Some '\\', true)  -> scan (i + 1) ("\\" :: parts) false
+        | (Some 'n',  true)  -> scan (i + 1) ("\n" :: parts) false
         | (Some _,    true)  -> Error "invalid escape sequence in string literal"
       in
       (match scan (i + 1) [] false with
