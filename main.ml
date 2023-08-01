@@ -1657,12 +1657,215 @@ let elab (ast : ast) : (core, string) result =
         ) ast initial_ctx
   in Ok (List.concat ast')
 
+type compile_target = | Scheme
+
+let compile (target : compile_target) (decls : core) : string =
+  let result = ref [] in
+  let emit s = result := (s :: deref result) in
+  let tmp_var =
+    let next_id = counter () in
+    fun () -> ("t" ^ string_of_int (next_id ()))
+  in
+  let scheme () =
+    let indent = ref 0 in
+    let indent () = indent := deref indent + 2
+    and dedent () = indent := deref indent - 2
+    and emit_ln s = emit (String.make (deref indent) ' ' ^ s ^ "\n")
+    in
+    let sequence expr =
+      let v = tmp_var () in
+      emit_ln ("(define " ^ v ^ " " ^ expr ^ ")");
+      v
+    in
+    let go_var (Binding (name, id, prov, _, _)) =
+      match prov with
+      | User ->
+        (* TODO: filter out quotes from the string name, then use it *)
+        "v" ^ string_of_int id
+      | Builtin prefix ->
+        match name with
+        | ";" -> "miniml-semicolon"
+        | _   -> "miniml-" ^ prefix ^ name
+    and go_cvar (CBinding (name, id, prov, _, _, _)) =
+      match prov with
+      | Builtin _ -> invalid_arg "builtin constructors are handled specially"
+      | User -> "'" ^ name ^ string_of_int id
+    in
+    let rec pat_local_vars p : core_var list =
+      match p with
+      | POr (p, _)   -> pat_local_vars p (* will be the same in both branches *)
+      | PList ps
+      | PTuple ps    -> List.concat (List.map pat_local_vars ps)
+      | PCon (_, ps) -> List.concat (List.map pat_local_vars (Option.get ps))
+      | PCharLit _ | PIntLit _ | PStrLit _
+      | PWild        -> []
+      | PVar v       -> v :: []
+      | PAsc (p, _)  -> invalid_arg "PAsc should not longer be present in core_pat"
+    in
+    let rec go_pat p : string =
+      (* TODO: a lot of opportunities to generate more sensible/idiomatic code here *)
+      match p with
+      | POr (p1, p2) -> "(or " ^ go_pat p1 ^ " " ^ go_pat p2 ^ ")"
+      | PTuple ps -> "(and" ^ (String.concat ""
+                       (List.mapi
+                         (fun idx p ->
+                           " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int idx ^ "))) "
+                           ^ go_pat p ^ ")") ps)) ^ ")"
+      | PList [] -> "(null? scrutinee)"
+      | PList (p :: ps) ->
+        "(and (pair? scrutinee) " ^
+            " (let ((scrutinee (car scrutinee))) " ^ go_pat p          ^ ")" ^
+            " (let ((scrutinee (cdr scrutinee))) " ^ go_pat (PList ps) ^ "))"
+      | PCon (c, ps) ->
+        "(and (eq? (vector-ref scrutinee 0) " ^ go_cvar c ^ ")" ^ (String.concat ""
+          (List.mapi
+            (fun idx p ->
+              " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int (idx + 1) ^ "))) "
+              ^ go_pat p ^ ")") (Option.get ps))) ^ ")"
+      (* TODO: implement PFooLit *)
+      | PVar v -> "(begin (set! " ^ go_var v ^ " scrutinee) #t)"
+      | PAsc (p, _)  -> invalid_arg "PAsc should not longer be present in core_pat"
+      | PWild -> "#t"
+    in
+    let rec go_expr e : string =
+      match e with
+      | Tuple es ->
+        "(vector " ^ (String.concat " " (List.map go_expr es)) ^ ")"
+      | List es ->
+        List.fold_right (fun e acc -> "(cons " ^ e ^ " " ^ acc ^ ")")
+          (List.map go_expr es) "'()"
+      | Con (cv, es) ->
+        "(vector " ^ go_cvar cv ^ " " ^
+          (String.concat " " (List.map go_expr (Option.get es))) ^ ")"
+      | CharLit c ->
+        let code = int_of_char c in
+        if 32 < code && code < 128 then
+          "#\\" ^ String.make 1 c
+        else if c = ' ' then
+          "#\\space"
+        else if c = '\n' then
+          "#\\newline"
+        else
+          invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
+      | IntLit i ->
+        string_of_int i
+      | StrLit s ->
+        let rec go acc i =
+          if i < 0 then String.concat "" ("\"" :: acc) else
+          let c = match String.get s i with
+                  | '"'  -> "\\\""
+                  | '\\' -> "\\\\"
+                  | '\n' -> "\\newline"
+                  | c    -> let code = int_of_char c in
+                            if 32 < code && code < 128 then
+                              String.make 1 c
+                            else
+                              invalid_arg ("we don't yet support this character code: "
+                                          ^ string_of_int code)
+          in go (c :: acc) (i - 1)
+        in go ("\"" :: []) (String.length s - 1)
+      | Var v ->
+        go_var v
+      | LetOpen (_, _) ->
+        invalid_arg "LetOpen should no longer be present in core_expr"
+      | App (e1, e2) ->
+        let e1' = go_expr e1 in
+        let e2' = go_expr e2 in
+        sequence ("(" ^ e1' ^ " " ^ e2' ^ ")")
+      | LetIn (bs, e) ->
+        bindings bs;
+        go_expr e
+      | Match (scrutinee, branches) ->
+        (
+          let locals = List.concat (List.map (fun (p, _) -> pat_local_vars p) branches) in
+          emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals))
+        );
+        let scrutinee' = go_expr scrutinee in
+        let tv = tmp_var () in
+        emit_ln ("(define " ^ tv ^ " (let ((scrutinee " ^ scrutinee' ^ "))");
+        indent ();
+        emit_ln "(cond";
+        List.iter (fun (pat, e) ->
+          emit_ln (" (" ^ go_pat pat);
+          emit_ln ("  (let ()");
+          indent (); indent ();
+          emit_ln (go_expr e ^ "))");
+          dedent (); dedent ();
+        ) branches;
+        emit_ln "  (#t (miniml-failure \"no mattern in match statement matched\")))))";
+        dedent ();
+        tv
+      | IfThenElse (e_cond, e_then, e_else) ->
+        let e_cond' = go_expr e_cond in
+        let tv = tmp_var () in
+        emit_ln ("(define " ^ tv ^ " (if " ^ e_cond');
+        indent ();
+        emit_ln "(let ()";
+        indent ();
+        emit_ln (go_expr e_then ^ ")");
+        dedent ();
+        emit_ln "(let ()";
+        indent ();
+        emit_ln (go_expr e_else ^ ")))");
+        dedent ();
+        dedent ();
+        tv
+      | Fun ([], body) ->
+        go_expr body
+      | Fun (arg :: [], body) ->
+        let tv = tmp_var () in
+        emit_ln ("(define " ^ tv ^ " (lambda (scrutinee)");
+        indent ();
+        let locals = pat_local_vars arg in
+        emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
+        emit_ln ("(when (not " ^ go_pat arg ^ ")");
+        emit_ln ("  (miniml-failure \"irrefutable fun argument pattern did not match\"))");
+        emit (go_expr body ^ "))");
+        dedent ();
+        tv
+      | Fun (arg :: args, body) ->
+        go_expr (Fun (arg :: [], Fun (args, body)))
+    and bindings (Bindings (_, bs)) =
+      (* TODO: if the bindings aren't recursive, we can declare all these one binding a time *)
+      let locals = List.concat (List.map (fun (p, _, _, _) -> pat_local_vars p) bs) in
+      emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
+      emit_ln "(when (not (and";
+      indent ();
+      List.iter (fun (head, args, _, rhs) ->
+        let rhs = Fun (args, rhs) in
+        emit_ln "(let ((scrutinee (let ()";
+        indent (); indent (); indent (); indent ();
+        emit_ln (go_expr rhs ^ ")))");
+        dedent (); dedent (); dedent ();
+        emit_ln (go_pat head ^ ")");
+        dedent ()
+      ) bs;
+      dedent ();
+      emit_ln " ))";
+      emit_ln "  (miniml-failure \"irrefutable binding did not match\"))"
+    in
+    emit_ln "(load \"prelude.scm\")";
+    emit_ln "";
+    emit_ln "(call/cc (lambda (k)";
+    indent ();
+    emit_ln "(define (miniml-failure e)";
+    emit_ln "  (display (string-append \"MiniML failure: \" e))";
+    emit_ln "  (k '()))";
+    List.iter bindings decls;
+    dedent ();
+    emit_ln "))"
+  in
+  (match target with
+   | Scheme -> scheme ());
+  String.concat "" (List.rev (deref result))
+
 let text =
   let f = In_channel.open_text "scratchpad.mini-ml" in
   let text = In_channel.input_all f in
   In_channel.close f;
   text
 
-let ast =
-  elab =<< (parse =<< lex text)
-
+let () =
+  match elab =<< (parse =<< lex text) with
+  | Ok core -> print_endline (compile Scheme core)
+  | Error e -> prerr_endline ("Error: " ^ e)
