@@ -1733,6 +1733,7 @@ let compile (target : compile_target) (decls : core) : string =
       (* TODO: a lot of opportunities to generate more sensible/idiomatic code here *)
       match p with
       | POr (p1, p2) -> "(or " ^ go_pat p1 ^ " " ^ go_pat p2 ^ ")"
+      | PTuple [] -> "#t"
       | PTuple ps -> "(and" ^ (String.concat ""
                        (List.mapi
                          (fun idx p ->
@@ -1758,6 +1759,8 @@ let compile (target : compile_target) (decls : core) : string =
     in
     let rec go_expr e : string =
       match e with
+      | Tuple [] ->
+        "'()"
       | Tuple es ->
         "(vector " ^ (String.concat " " (List.map go_expr es)) ^ ")"
       | List es ->
