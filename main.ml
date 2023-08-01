@@ -744,16 +744,18 @@ type core_type = | CQVar of core_qvar
                  | CTCon of core_con * core_type list
 and  core_uvar = | Unknown of string * core_var_id * core_level
                  | Known   of core_type
+and  core_prov = | User
+                 | Builtin of string (* module prefix *)
 (* ordinary variable binding *)
 type core_var  = | Binding of string (* name in the syntax *)
                             * core_var_id (* numeric ID *)
-                            * bool        (* builtin? *)
+                            * core_prov   (* user-defined or builtin? *)
                             * core_qvar list (* forall parameters *)
                             * core_type (* type *)
 (* constructor variable binding *)
 type core_cvar = | CBinding of string (* name in the syntax *)
                              * core_var_id (* numeric ID *)
-                             * bool        (* builtin? *)
+                             * core_prov   (* user-defined or builtin? *)
                              * core_qvar list (* forall parameters *)
                              * core_type list (* parameter types *)
                              * core_type      (* return type *)
@@ -1016,13 +1018,16 @@ let initial_ctx
   let qab = b :: qa and b = CQVar b in
   let c = QVar ("c", next_var_id ()) in
   let qabc = c :: qab and c = CQVar c in
-  let rec mk_ctx callback =
+  let rec mk_ctx callback prefix =
     let ctx = ref empty_ctx in
+    let provenance = Builtin prefix in
     let add name qvars ty =
-      ctx := extend (deref ctx) (Binding (name, next_var_id (), true, qvars, ty))
+      ctx := extend (deref ctx)
+               (Binding (name, next_var_id (), provenance, qvars, ty))
     in
     let add_con name qvars params result =
-      ctx := extend_con (deref ctx) (CBinding (name, next_var_id (), true, qvars, params, result))
+      ctx := extend_con (deref ctx)
+               (CBinding (name, next_var_id (), provenance, qvars, params, result))
     in
     let add_ty name arity =
       let con = CCon (name, next_con_id ()) in
@@ -1033,7 +1038,7 @@ let initial_ctx
       (ctx := extend_ty (deref ctx) (CAlias (con, 0, [], def)); def)
     in
     let add_mod name m =
-      ctx := extend_mod (deref ctx) (name, m)
+      ctx := extend_mod (deref ctx) (name, m (prefix ^ name ^ "."))
     in
     (callback add add_con add_ty add_alias add_mod; deref ctx)
   in
@@ -1129,7 +1134,7 @@ let initial_ctx
       ))
     );
     ())))
-  )
+  ) ""
 
 let preprocess_constructor_args
   (* TODO: move into elab once we support generalizing nested functions *)
@@ -1295,7 +1300,7 @@ let elab (ast : ast) : (core, string) result =
               in Ok (extend_con ctx (
                 CBinding (name,
                           next_var_id (),
-                          false,
+                          User,
                           ty_params,
                           param_tys',
                           return_type)))
@@ -1395,7 +1400,7 @@ let elab (ast : ast) : (core, string) result =
       let* bindings = go pat in
       Ok (map_map
         (fun s () -> let uv = CUVar (new_uvar lvl (Some s) ()) in
-                     Binding (s, next_var_id (), false, [], uv)
+                     Binding (s, next_var_id (), User, [], uv)
         ) bindings)
   (* TODO: exhaustiveness checking? *)
   and infer_pat_with_vars lvl ctx (bindings : core_var string_map) :
@@ -1618,7 +1623,7 @@ let elab (ast : ast) : (core, string) result =
         let types = List.map (fun (Binding (_, _, _, [], ty)) -> ty) bound_vars in
         let (qvars, types) = generalize lvl types in
         List.map2 (fun var ty ->
-          let (Binding (name, id, _, _, _)) = var in
+          let (Binding (name, id, prov, _, _)) = var in
           (* NOTE: What's going on here? We are allocating a "new" variable,
           but giving it the same ID as the above. This is fine, because (since
           generalization mutates the types it encounters, replacing the uvars
@@ -1632,7 +1637,7 @@ let elab (ast : ast) : (core, string) result =
           However, this does feel a little inelegant, and it would be nice to
           avoid it, e.g. by making the qvar list in Binding be a ref. *)
           (* TODO: maybe trim the qvars to those which appear in the ty? *)
-          Binding (name, id, false, qvars, ty)
+          Binding (name, id, prov, qvars, ty)
         ) bound_vars types
     in
     let bindings = List.map (fun (_, _, binding) -> binding) bindings in
