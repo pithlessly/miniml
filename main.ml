@@ -1829,7 +1829,7 @@ let compile (target : compile_target) (decls : core) : string =
           emit_ln (go_expr e ^ "))");
           dedent (); dedent ();
         ) branches;
-        emit_ln "  (#t (miniml-failure \"no mattern in match statement matched\")))))";
+        emit_ln "  (else (miniml-failure \"no pattern in match expression matched\")))))";
         dedent ();
         tv
       | IfThenElse (e_cond, e_then, e_else) ->
