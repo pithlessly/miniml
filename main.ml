@@ -1714,9 +1714,10 @@ let compile (target : compile_target) (decls : core) : string =
         | ";" -> "miniml-semicolon"
         | _   -> "miniml-" ^ prefix ^ name
     and go_cvar (CBinding (name, id, prov, _, _, _)) =
-      match prov with
-      | Builtin _ -> invalid_arg "builtin constructors are handled specially"
-      | User -> "'" ^ name ^ string_of_int id
+      match (prov, name) with
+      | (Builtin "", ("Error" | "Ok"))
+      | (User, _) -> "'" ^ name ^ string_of_int id
+      | _ -> invalid_arg "builtin constructors are handled specially"
     in
     let rec pat_local_vars p : core_var list =
       match p with
@@ -1745,11 +1746,26 @@ let compile (target : compile_target) (decls : core) : string =
             " (let ((scrutinee (car scrutinee))) " ^ go_pat p          ^ ")" ^
             " (let ((scrutinee (cdr scrutinee))) " ^ go_pat (PList ps) ^ "))"
       | PCon (c, ps) ->
-        "(and (eq? (vector-ref scrutinee 0) " ^ go_cvar c ^ ")" ^ (String.concat ""
-          (List.mapi
-            (fun idx p ->
-              " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int (idx + 1) ^ "))) "
-              ^ go_pat p ^ ")") (Option.get ps))) ^ ")"
+        let vector_layout () =
+          "(and (eq? (vector-ref scrutinee 0) " ^ go_cvar c ^ ")" ^ (String.concat ""
+            (List.mapi
+              (fun idx p ->
+                " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int (idx + 1) ^ "))) "
+                ^ go_pat p ^ ")") (Option.get ps))) ^ ")"
+        in (
+        match c with
+        | CBinding (name, _, User, _, _, _) -> vector_layout ()
+        | CBinding (name, _, Builtin _, _, _, _) ->
+          match (name, Option.get ps) with
+          | ("true",  []) -> "scrutinee"
+          | ("false", []) -> "(not scrutinee)"
+          | ("None",      []) -> "(null? scrutinee)"
+          | ("Some", p :: []) -> "(and (pair? scrutinee)" ^
+                                     " (let ((scrutinee (car scrutinee))) " ^
+                                         go_pat p ^ "))"
+          | (("Ok" | "Error"), _) -> vector_layout ()
+          | (_, ps) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
+                             ^ string_of_int (List.length ps)))
       | PCharLit c -> "(char=? scrutinee " ^ go_char c ^ ")"
       | PIntLit i -> "(= scrutinee " ^ go_int i ^ ")"
       | PStrLit s -> "(string=? scrutinee " ^ go_str s ^ ")"
@@ -1766,9 +1782,22 @@ let compile (target : compile_target) (decls : core) : string =
       | List es ->
         List.fold_right (fun e acc -> "(cons " ^ e ^ " " ^ acc ^ ")")
           (List.map go_expr es) "'()"
-      | Con (cv, es) ->
-        "(vector " ^ go_cvar cv ^ " " ^
-          (String.concat " " (List.map go_expr (Option.get es))) ^ ")"
+      | Con (c, es) ->
+        let vector_layout () =
+          "(vector " ^ go_cvar c ^ " " ^
+            (String.concat " " (List.map go_expr (Option.get es))) ^ ")"
+        in (
+        match c with
+        | CBinding (name, _, User, _, _, _) -> vector_layout ()
+        | CBinding (name, _, Builtin _, _, _, _) ->
+          match (name, Option.get es) with
+          | ("true",  []) -> "#t"
+          | ("false", []) -> "#f"
+          | ("None",      []) -> "'()"
+          | ("Some", e :: []) -> "(list " ^ go_expr e ^ ")"
+          | (("Ok" | "Error"), _) -> vector_layout ()
+          | (_, es) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
+                             ^ string_of_int (List.length es)))
       | CharLit c -> go_char c
       | IntLit i -> go_int i
       | StrLit s -> go_str s
