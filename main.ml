@@ -1828,7 +1828,7 @@ let compile (target : compile_target) (decls : core) : string =
           let locals = List.concat (List.map (fun (p, _) -> pat_local_vars p) branches) in
           emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals))
         );
-        let scrutinee' = go_expr scrutinee in
+        (let scrutinee' = go_expr scrutinee in
         let tv = tmp_var () in
         emit_ln ("(define " ^ tv ^ " (let ((scrutinee " ^ scrutinee' ^ "))");
         indent ();
@@ -1838,11 +1838,11 @@ let compile (target : compile_target) (decls : core) : string =
           emit_ln ("  (let ()");
           indent (); indent ();
           emit_ln (go_expr e ^ "))");
-          dedent (); dedent ();
+          dedent (); dedent ()
         ) branches;
         emit_ln "  (else (miniml-failure \"no pattern in match expression matched\")))))";
         dedent ();
-        tv
+        tv)
       | IfThenElse (e_cond, e_then, e_else) ->
         let e_cond' = go_expr e_cond in
         let tv = tmp_var () in
@@ -1864,13 +1864,13 @@ let compile (target : compile_target) (decls : core) : string =
         let tv = tmp_var () in
         emit_ln ("(define " ^ tv ^ " (lambda (scrutinee)");
         indent ();
-        let locals = pat_local_vars arg in
+        (let locals = pat_local_vars arg in
         emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
         emit_ln ("(when (not " ^ go_pat arg ^ ")");
         emit_ln ("  (miniml-failure \"irrefutable fun argument pattern did not match\"))");
         emit (go_expr body ^ "))");
         dedent ();
-        tv
+        tv)
       | Fun (arg :: args, body) ->
         go_expr (Fun (arg :: [], Fun (args, body)))
     and bindings (Bindings (_, bs)) =
