@@ -1062,8 +1062,8 @@ let initial_ctx
     (* TODO: make ordered comparisons int-specific *)
     add ">="  qa (a --> (a --> t_bool));
     add "<="  qa (a --> (a --> t_bool));
-    add "<"   qa (a --> (a --> t_bool));
     add ">"   qa (a --> (a --> t_bool));
+    add "<"   qa (a --> (a --> t_bool));
     add "="   qa (a --> (a --> t_bool));
     add "<>"  qa (a --> (a --> t_bool));
     add "=="  qa (a --> (a --> t_bool));
@@ -1076,6 +1076,7 @@ let initial_ctx
     add "string_of_int" [] (t_int --> t_string);
     add "int_of_char"   [] (t_char --> t_int);
     add "print_endline" [] (t_string --> t_unit);
+    add "prerr_endline" [] (t_string --> t_unit);
     add "invalid_arg" qa (t_string --> a);
     add_con "true"  [] [] t_bool;
     add_con "false" [] [] t_bool;
@@ -1102,6 +1103,7 @@ let initial_ctx
       add "fold_right" qab  ((b --> (a --> a)) --> (t_list b --> (a --> a)));
       add "map"        qab  ((a --> b) --> (t_list a --> t_list b));
       add "map2"       qabc ((a --> (b --> c)) --> (t_list a --> (t_list b --> t_list c)));
+      add "mapi"       qab  ((t_int --> (a --> b)) --> (t_list a --> t_list b));
       add "find_opt"   qa   ((a --> t_bool) --> (t_list a --> t_option a));
       add "iter"       qa   ((a --> t_unit) --> (t_list a --> t_unit));
       add "length"     qa   (t_list a --> t_int);
@@ -1123,6 +1125,7 @@ let initial_ctx
     ));
     add_mod "Option" (mk_ctx (fun add _ _ _ _ ->
       add "map" qab ((a --> b) --> (t_option a --> t_option b));
+      add "get" qab (t_option a --> a);
       ()
     ));
     (
