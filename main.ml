@@ -1068,6 +1068,7 @@ let initial_ctx
     add "snd" qab (CTCon (t_tuple, a :: b :: []) --> b);
     add "int_of_string" [] (t_string --> t_int);
     add "string_of_int" [] (t_int --> t_string);
+    add "int_of_char"   [] (t_char --> t_int);
     add "print_endline" [] (t_string --> t_unit);
     add "invalid_arg" qa (t_string --> a);
     add_con "true"  [] [] t_bool;
