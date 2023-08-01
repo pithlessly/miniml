@@ -1696,7 +1696,7 @@ let compile (target : compile_target) (decls : core) : string =
                 | '\\' -> "\\\\"
                 | '\n' -> "\\newline"
                 | c    -> let code = int_of_char c in
-                          if 32 < code && code < 128 then
+                          if 32 <= code && code < 128 then
                             String.make 1 c
                           else
                             invalid_arg ("we don't yet support this character code: "
