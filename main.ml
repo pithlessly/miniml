@@ -1711,8 +1711,9 @@ let compile (target : compile_target) (decls : core) : string =
         "v" ^ string_of_int id
       | Builtin prefix ->
         match name with
-        | ";" -> "miniml-semicolon"
-        | _   -> "miniml-" ^ prefix ^ name
+        | ";"  -> "miniml-semicolon"
+        | "::" -> "miniml-cons"
+        | _    -> "miniml-" ^ prefix ^ name
     and go_cvar (CBinding (name, id, prov, _, _, _)) =
       match (prov, name) with
       | (Builtin "", ("Error" | "Ok"))
