@@ -1677,6 +1677,33 @@ let compile (target : compile_target) (decls : core) : string =
       emit_ln ("(define " ^ v ^ " " ^ expr ^ ")");
       v
     in
+    let go_char c =
+      let code = int_of_char c in
+      if 32 < code && code < 128 then
+        "#\\" ^ String.make 1 c
+      else if c = ' ' then
+        "#\\space"
+      else if c = '\n' then
+        "#\\newline"
+      else
+        invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
+    and go_int = string_of_int
+    and go_str s =
+      let rec go acc i =
+        if i < 0 then String.concat "" ("\"" :: acc) else
+        let c = match String.get s i with
+                | '"'  -> "\\\""
+                | '\\' -> "\\\\"
+                | '\n' -> "\\newline"
+                | c    -> let code = int_of_char c in
+                          if 32 < code && code < 128 then
+                            String.make 1 c
+                          else
+                            invalid_arg ("we don't yet support this character code: "
+                                        ^ string_of_int code)
+        in go (c :: acc) (i - 1)
+      in go ("\"" :: []) (String.length s - 1)
+    in
     let go_var (Binding (name, id, prov, _, _)) =
       match prov with
       | User ->
@@ -1722,7 +1749,9 @@ let compile (target : compile_target) (decls : core) : string =
             (fun idx p ->
               " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int (idx + 1) ^ "))) "
               ^ go_pat p ^ ")") (Option.get ps))) ^ ")"
-      (* TODO: implement PFooLit *)
+      | PCharLit c -> "(char=? scrutinee " ^ go_char c ^ ")"
+      | PIntLit i -> "(= scrutinee " ^ go_int i ^ ")"
+      | PStrLit s -> "(string=? scrutinee " ^ go_str s ^ ")"
       | PVar v -> "(begin (set! " ^ go_var v ^ " scrutinee) #t)"
       | PAsc (p, _)  -> invalid_arg "PAsc should not longer be present in core_pat"
       | PWild -> "#t"
@@ -1737,33 +1766,9 @@ let compile (target : compile_target) (decls : core) : string =
       | Con (cv, es) ->
         "(vector " ^ go_cvar cv ^ " " ^
           (String.concat " " (List.map go_expr (Option.get es))) ^ ")"
-      | CharLit c ->
-        let code = int_of_char c in
-        if 32 < code && code < 128 then
-          "#\\" ^ String.make 1 c
-        else if c = ' ' then
-          "#\\space"
-        else if c = '\n' then
-          "#\\newline"
-        else
-          invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
-      | IntLit i ->
-        string_of_int i
-      | StrLit s ->
-        let rec go acc i =
-          if i < 0 then String.concat "" ("\"" :: acc) else
-          let c = match String.get s i with
-                  | '"'  -> "\\\""
-                  | '\\' -> "\\\\"
-                  | '\n' -> "\\newline"
-                  | c    -> let code = int_of_char c in
-                            if 32 < code && code < 128 then
-                              String.make 1 c
-                            else
-                              invalid_arg ("we don't yet support this character code: "
-                                          ^ string_of_int code)
-          in go (c :: acc) (i - 1)
-        in go ("\"" :: []) (String.length s - 1)
+      | CharLit c -> go_char c
+      | IntLit i -> go_int i
+      | StrLit s -> go_str s
       | Var v ->
         go_var v
       | LetOpen (_, _) ->
