@@ -1694,7 +1694,7 @@ let compile (target : compile_target) (decls : core) : string =
         let c = match String.get s i with
                 | '"'  -> "\\\""
                 | '\\' -> "\\\\"
-                | '\n' -> "\\newline"
+                | '\n' -> "\\n"
                 | c    -> let code = int_of_char c in
                           if 32 <= code && code < 128 then
                             String.make 1 c
