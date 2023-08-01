@@ -1764,6 +1764,12 @@ let compile (target : compile_target) (decls : core) : string =
           match (name, Option.get ps) with
           | ("true",  []) -> "scrutinee"
           | ("false", []) -> "(not scrutinee)"
+          | ("::", p1 :: p2 :: []) ->
+            "(and (pair? scrutinee)" ^
+                " (let ((scrutinee (car scrutinee))) " ^
+                    go_pat p1 ^ ")" ^
+                " (let ((scrutinee (cdr scrutinee))) " ^
+                    go_pat p2 ^ "))"
           | ("None",      []) -> "(null? scrutinee)"
           | ("Some", p :: []) -> "(and (pair? scrutinee)" ^
                                      " (let ((scrutinee (car scrutinee))) " ^
