@@ -48,6 +48,7 @@
   (display s (current-error-port))
   (display "\n" (current-error-port)))
 (define miniml-invalid_arg error)
+(define miniml-exit        exit)
 (define (miniml-ref x) (vector 'ref x))
 (define (miniml-! r)   (vector-ref r 1))
 (define  miniml-:=     (lambda (r) (lambda (x) (vector-set! r 1 x))))

@@ -1078,6 +1078,7 @@ let initial_ctx
     add "print_endline" [] (t_string --> t_unit);
     add "prerr_endline" [] (t_string --> t_unit);
     add "invalid_arg" qa (t_string --> a);
+    add "exit"        qa (t_int --> a);
     add_con "true"  [] [] t_bool;
     add_con "false" [] [] t_bool;
     (
@@ -1916,4 +1917,4 @@ let text =
 let () =
   match elab =<< (parse =<< lex text) with
   | Ok core -> print_endline (compile Scheme core)
-  | Error e -> prerr_endline ("Error: " ^ e)
+  | Error e -> (prerr_endline ("Error: " ^ e); exit 1)
