@@ -1869,7 +1869,7 @@ let compile (target : compile_target) (decls : core) : string =
         emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
         emit_ln ("(when (not " ^ go_pat arg ^ ")");
         emit_ln ("  (miniml-failure \"irrefutable fun argument pattern did not match\"))");
-        emit (go_expr body ^ "))");
+        emit_ln (go_expr body ^ "))");
         dedent ();
         tv)
       | Fun (arg :: args, body) ->
