@@ -1752,17 +1752,21 @@ let compile (target : compile_target) (decls : core) : string =
             " (let ((scrutinee (car scrutinee))) " ^ go_pat p          ^ ")" ^
             " (let ((scrutinee (cdr scrutinee))) " ^ go_pat (PList ps) ^ "))"
       | PCon (c, ps) ->
+        let ps = Option.get ps in
         let vector_layout () =
-          "(and (eq? (vector-ref scrutinee 0) " ^ go_cvar c ^ ")" ^ (String.concat ""
-            (List.mapi
-              (fun idx p ->
-                " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int (idx + 1) ^ "))) "
-                ^ go_pat p ^ ")") (Option.get ps))) ^ ")"
+          match ps with
+          | [] -> "(eq? scrutinee " ^ go_cvar c ^ ")"
+          | _ ->
+            "(and (vector? scrutinee) (eq? (vector-ref scrutinee 0) " ^ go_cvar c ^ ")" ^ (String.concat ""
+              (List.mapi
+                (fun idx p ->
+                  " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int (idx + 1) ^ "))) "
+                  ^ go_pat p ^ ")") ps)) ^ ")"
         in (
         match c with
         | CBinding (name, _, User, _, _, _) -> vector_layout ()
         | CBinding (name, _, Builtin _, _, _, _) ->
-          match (name, Option.get ps) with
+          match (name, ps) with
           | ("true",  []) -> "scrutinee"
           | ("false", []) -> "(not scrutinee)"
           | ("::", p1 :: p2 :: []) ->
@@ -1795,14 +1799,18 @@ let compile (target : compile_target) (decls : core) : string =
         List.fold_right (fun e acc -> "(cons " ^ e ^ " " ^ acc ^ ")")
           (List.map go_expr es) "'()"
       | Con (c, es) ->
+        let es = Option.get es in
         let vector_layout () =
-          "(vector " ^ go_cvar c ^ (String.concat ""
-            (List.map (fun e -> " " ^ go_expr e) (Option.get es))) ^ ")"
+          match es with
+          | [] -> go_cvar c
+          | _ ->
+            "(vector " ^ go_cvar c ^ (String.concat ""
+              (List.map (fun e -> " " ^ go_expr e) es)) ^ ")"
         in (
         match c with
         | CBinding (name, _, User, _, _, _) -> vector_layout ()
         | CBinding (name, _, Builtin _, _, _, _) ->
-          match (name, Option.get es) with
+          match (name, es) with
           | ("true",  []) -> "#t"
           | ("false", []) -> "#f"
           | ("None",      []) -> "'()"
