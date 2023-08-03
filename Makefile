@@ -10,6 +10,9 @@ target/%.ml: %.ml target
 target:
 	mkdir -p target
 
+scratchpad.mini-ml: main.ml
+	cp $< $@
+
 target/compiled.scm: target/main.exe scratchpad.mini-ml
 	$< > target/tmp.scm
 	cp target/tmp.scm $@
@@ -21,4 +24,4 @@ target/compiled2.scm: target/compiled.scm prelude.scm
 run: target/compiled2.scm
 verify_bootstrapping: target/compiled2.scm target/compiled.scm
 	diff $^
-	@printf "\x1b[32m""bootstrapping successful!\x1b[m\n"
+	@printf "\x1b[32m""bootstrapping successful!""\x1b[m""\n"
