@@ -1625,7 +1625,7 @@ let elab (ast : ast) : (core, string) result =
       if not can_generalize then
         bound_vars
       else
-        let types = List.map (fun (Binding (_, _, _, [], ty)) -> ty) bound_vars in
+        let types = List.map (fun (Binding (_, _, _, _, ty)) -> ty) bound_vars in
         let (qvars, types) = generalize lvl types in
         List.map2 (fun var ty ->
           let (Binding (name, id, prov, _, _)) = var in
