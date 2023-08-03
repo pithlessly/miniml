@@ -1796,8 +1796,8 @@ let compile (target : compile_target) (decls : core) : string =
           (List.map go_expr es) "'()"
       | Con (c, es) ->
         let vector_layout () =
-          "(vector " ^ go_cvar c ^ " " ^
-            (String.concat " " (List.map go_expr (Option.get es))) ^ ")"
+          "(vector " ^ go_cvar c ^ (String.concat ""
+            (List.map (fun e -> " " ^ go_expr e) (Option.get es))) ^ ")"
         in (
         match c with
         | CBinding (name, _, User, _, _, _) -> vector_layout ()
@@ -1834,16 +1834,20 @@ let compile (target : compile_target) (decls : core) : string =
         emit_ln ("(define " ^ tv ^ " (let ((scrutinee " ^ scrutinee' ^ "))");
         indent ();
         emit_ln "(cond";
+        (let last_is_t = ref false in
         List.iter (fun (pat, e) ->
+          let pat' = go_pat pat in
+          last_is_t := (pat' = "#t");
           emit_ln (" (" ^ go_pat pat);
           emit_ln ("  (let ()");
           indent (); indent ();
           emit_ln (go_expr e ^ "))");
           dedent (); dedent ()
         ) branches;
-        emit_ln "  (else (miniml-failure \"no pattern in match expression matched\")))))";
+        emit_ln (if deref last_is_t then " )))"
+                                    else " (else (miniml-match-failure)))))");
         dedent ();
-        tv)
+        tv))
       | IfThenElse (e_cond, e_then, e_else) ->
         let e_cond' = go_expr e_cond in
         let tv = tmp_var () in
@@ -1867,8 +1871,7 @@ let compile (target : compile_target) (decls : core) : string =
         indent ();
         (let locals = pat_local_vars arg in
         emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
-        emit_ln ("(when (not " ^ go_pat arg ^ ")");
-        emit_ln ("  (miniml-failure \"irrefutable fun argument pattern did not match\"))");
+        emit_ln ("(miniml-fun-guard " ^ go_pat arg ^ ")");
         emit_ln (go_expr body ^ "))");
         dedent ();
         tv)
@@ -1878,7 +1881,7 @@ let compile (target : compile_target) (decls : core) : string =
       (* TODO: if the bindings aren't recursive, we can declare all these one binding a time *)
       let locals = List.concat (List.map (fun (p, _, _, _) -> pat_local_vars p) bs) in
       emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
-      emit_ln "(when (not (and";
+      emit_ln "(miniml-let-guard (and";
       indent ();
       List.iter (fun (head, args, _, rhs) ->
         let rhs = Fun (args, rhs) in
@@ -1890,8 +1893,7 @@ let compile (target : compile_target) (decls : core) : string =
         dedent ()
       ) bs;
       dedent ();
-      emit_ln " ))";
-      emit_ln "  (miniml-failure \"irrefutable binding did not match\"))"
+      emit_ln " ))"
     in
     emit_ln "(load \"prelude.scm\")";
     emit_ln "";
