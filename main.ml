@@ -1901,14 +1901,7 @@ let compile (target : compile_target) (decls : core) : string =
     in
     emit_ln "(load \"prelude.scm\")";
     emit_ln "";
-    emit_ln "(call/cc (lambda (k)";
-    indent 2 (fun () ->
-      emit_ln "(define (miniml-failure e)";
-      emit_ln "  (display (string-append \"MiniML failure: \" e))";
-      emit_ln "  (k '()))";
-      List.iter bindings decls
-    );
-    emit_ln "))"
+    List.iter bindings decls
   in
   (match target with
    | Scheme -> scheme ());

@@ -124,10 +124,10 @@
 (define miniml-In_channel.close close-input-port)
 
 (define (miniml-match-failure)
-  (miniml-failure "no pattern in match expression matched"))
+  (error "no pattern in match expression matched"))
 (define (miniml-let-guard c)
   (if c '()
-        (miniml-failure "irrefutable pattern in let binding did not match")))
+        (error "irrefutable pattern in let binding did not match")))
 (define (miniml-fun-guard c)
   (if c '()
-        (miniml-failure "irrefutable fun argument pattern did not match")))
+        (error "irrefutable fun argument pattern did not match")))
