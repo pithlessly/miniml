@@ -109,10 +109,10 @@
   (lambda (f) (lambda (x) (lambda (y) ((f y) x)))))
 
 (define miniml-Option.map (curry2 map))
-(define (miniml-Option.get opt)
+(define (miniml-Option.unwrap opt)
   (if (pair? opt)
     (car opt)
-    (error "Option.get: None")))
+    (error "Option.unwrap: None")))
 
 (define miniml-In_channel.open_text open-input-file)
 (define (miniml-In_channel.input_all port)

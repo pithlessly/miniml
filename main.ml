@@ -1126,7 +1126,7 @@ let initial_ctx
     ));
     add_mod "Option" (mk_ctx (fun add _ _ _ _ ->
       add "map" qab ((a --> b) --> (t_option a --> t_option b));
-      add "get" qab (t_option a --> a);
+      add "unwrap" qa (t_option a --> a);
       ()
     ));
     (
@@ -1730,7 +1730,7 @@ let compile (target : compile_target) (decls : core) : string =
       | POr (p, _)   -> pat_local_vars p (* will be the same in both branches *)
       | PList ps
       | PTuple ps    -> List.concat (List.map pat_local_vars ps)
-      | PCon (_, ps) -> List.concat (List.map pat_local_vars (Option.get ps))
+      | PCon (_, ps) -> List.concat (List.map pat_local_vars (Option.unwrap ps))
       | PCharLit _ | PIntLit _ | PStrLit _
       | PWild        -> []
       | PVar v       -> v :: []
@@ -1752,7 +1752,7 @@ let compile (target : compile_target) (decls : core) : string =
             " (let ((scrutinee (car scrutinee))) " ^ go_pat p          ^ ")" ^
             " (let ((scrutinee (cdr scrutinee))) " ^ go_pat (PList ps) ^ "))"
       | PCon (c, ps) ->
-        let ps = Option.get ps in
+        let ps = Option.unwrap ps in
         let vector_layout () =
           match ps with
           | [] -> "(eq? scrutinee " ^ go_cvar c ^ ")"
@@ -1799,7 +1799,7 @@ let compile (target : compile_target) (decls : core) : string =
         List.fold_right (fun e acc -> "(cons " ^ e ^ " " ^ acc ^ ")")
           (List.map go_expr es) "'()"
       | Con (c, es) ->
-        let es = Option.get es in
+        let es = Option.unwrap es in
         let vector_layout () =
           match es with
           | [] -> go_cvar c
