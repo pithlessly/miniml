@@ -1,3 +1,5 @@
+(import (chicken process-context))
+
 (define (curry2 f) (lambda (a) (lambda (b)             (f a b)   )))
 (define (curry3 f) (lambda (a) (lambda (b) (lambda (c) (f a b c)))))
 
@@ -122,6 +124,22 @@
       (list->string (reverse chars))
       (loop (cons char chars)))))
 (define miniml-In_channel.close close-input-port)
+
+(define miniml-Miniml.log_level
+  (let ((debug (get-environment-variable "MINIML_DEBUG")))
+    (cond
+      ((equal? debug "2") 2)
+      ((equal? debug "1") 1)
+      (else 0))))
+
+(define (miniml-Miniml.debug msg)
+  (if (< miniml-Miniml.log_level 1) '()
+    (miniml-prerr_endline
+      (string-append "\x1b[33m(debug)\x1b[m " (msg '())))))
+(define (miniml-Miniml.trace msg)
+  (if (< miniml-Miniml.log_level 2) '()
+    (miniml-prerr_endline
+      (string-append "\x1b[33m(trace)\x1b[m " (msg '())))))
 
 (define (miniml-match-failure)
   (error "no pattern in match expression matched"))

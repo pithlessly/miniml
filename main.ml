@@ -1138,6 +1138,12 @@ let initial_ctx
         ()
       ))
     );
+    add_mod "Miniml" (mk_ctx (fun add _ _ _ _ ->
+      add "log_level" [] t_int;
+      add "debug" [] ((t_unit --> t_string) --> t_unit);
+      add "trace" [] ((t_unit --> t_string) --> t_unit);
+      ()
+    ));
     ()
   ) ""
 
@@ -1914,6 +1920,7 @@ let text =
   text
 
 let () =
+  Miniml.trace (fun () -> "Log level: " ^ string_of_int Miniml.log_level);
   match elab =<< (parse =<< lex text) with
   | Ok core -> print_endline (compile Scheme core)
   | Error e -> (prerr_endline ("Error: " ^ e); exit 1)
