@@ -1,14 +1,20 @@
-OCAMLC := ocamlc
+OCAMLC := ocamlopt
 SCHEME := csi -s
 
-target/main.exe: target/main.ml
-	$(OCAMLC) $< -o $@
+.PHONY: default
+default: target/compiled.scm
+
+target:
+	mkdir -p target
 
 target/%.ml: %.ml target
 	cp $< $@
 
-target:
-	mkdir -p target
+target/%.cmx: target/%.ml
+	$(OCAMLC) $<
+
+target/main.exe: target/main.ml target/ocamlshim.cmx
+	$(OCAMLC) -o $@ -I target ocamlshim.cmx -open Ocamlshim $<
 
 scratchpad.mini-ml: main.ml
 	cp $< $@
@@ -18,10 +24,14 @@ target/compiled.scm: target/main.exe scratchpad.mini-ml
 	cp target/tmp.scm $@
 
 target/compiled2.scm: target/compiled.scm prelude.scm
-	$(SCHEME) $< >$@
+	$(SCHEME) > target/tmp2.scm
+	cp $< $@
 
-.PHONY: run, verify_bootstrapping
-run: target/compiled2.scm
+.PHONY: verify_bootstrapping
 verify_bootstrapping: target/compiled2.scm target/compiled.scm
 	diff $^
 	@printf "\x1b[32m""bootstrapping successful!""\x1b[m""\n"
+
+.PHONY: clean
+clean:
+	rm -rf target
