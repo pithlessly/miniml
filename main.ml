@@ -1673,8 +1673,12 @@ let compile (target : compile_target) (decls : core) : string =
   in
   let scheme () =
     let indent = ref 0 in
-    let indent () = indent := deref indent + 2
-    and dedent () = indent := deref indent - 2
+    let indent n f =
+      let old = deref indent in
+      indent := old + n;
+      let result = f () in
+      indent := old;
+      result
     and emit_ln s = emit (String.make (deref indent) ' ' ^ s ^ "\n")
     in
     let sequence expr =
@@ -1840,48 +1844,41 @@ let compile (target : compile_target) (decls : core) : string =
         let scrutinee' = go_expr scrutinee in
         let tv = tmp_var () in
         emit_ln ("(define " ^ tv ^ " (let ((scrutinee " ^ scrutinee' ^ "))");
-        indent ();
-        emit_ln "(cond";
-        let last_is_t = ref false in
-        List.iter (fun (pat, e) ->
-          let pat' = go_pat pat in
-          last_is_t := (pat' = "#t");
-          emit_ln (" (" ^ go_pat pat);
-          emit_ln ("  (let ()");
-          indent (); indent ();
-          emit_ln (go_expr e ^ "))");
-          dedent (); dedent ()
-        ) branches;
-        emit_ln (if deref last_is_t then " )))"
-                                    else " (else (miniml-match-failure)))))");
-        dedent ();
+        indent 2 (fun () ->
+          emit_ln "(cond";
+          let last_is_t = ref false in
+          List.iter (fun (pat, e) ->
+            let pat' = go_pat pat in
+            last_is_t := (pat' = "#t");
+            emit_ln (" (" ^ go_pat pat);
+            emit_ln ("  (let ()");
+            indent 4 (fun () -> emit_ln (go_expr e ^ "))"))
+          ) branches;
+          emit_ln (if deref last_is_t then " )))"
+                                      else " (else (miniml-match-failure)))))"));
         tv
       | IfThenElse (e_cond, e_then, e_else) ->
         let e_cond' = go_expr e_cond in
         let tv = tmp_var () in
         emit_ln ("(define " ^ tv ^ " (if " ^ e_cond');
-        indent ();
-        emit_ln "(let ()";
-        indent ();
-        emit_ln (go_expr e_then ^ ")");
-        dedent ();
-        emit_ln "(let ()";
-        indent ();
-        emit_ln (go_expr e_else ^ ")))");
-        dedent ();
-        dedent ();
+        indent 2 (fun () ->
+          emit_ln "(let ()";
+          indent 2 (fun () -> emit_ln (go_expr e_then ^ ")"));
+          emit_ln "(let ()";
+          indent 2 (fun () -> emit_ln (go_expr e_else ^ ")))"))
+        );
         tv
       | Fun ([], body) ->
         go_expr body
       | Fun (arg :: [], body) ->
         let tv = tmp_var () in
         emit_ln ("(define " ^ tv ^ " (lambda (scrutinee)");
-        indent ();
-        let locals = pat_local_vars arg in
-        emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
-        emit_ln ("(miniml-fun-guard " ^ go_pat arg ^ ")");
-        emit_ln (go_expr body ^ "))");
-        dedent ();
+        indent 2 (fun () ->
+          let locals = pat_local_vars arg in
+          emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
+          emit_ln ("(miniml-fun-guard " ^ go_pat arg ^ ")");
+          emit_ln (go_expr body ^ "))")
+        );
         tv
       | Fun (arg :: args, body) ->
         go_expr (Fun (arg :: [], Fun (args, body)))
@@ -1890,28 +1887,27 @@ let compile (target : compile_target) (decls : core) : string =
       let locals = List.concat (List.map (fun (p, _, _, _) -> pat_local_vars p) bs) in
       emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
       emit_ln "(miniml-let-guard (and";
-      indent ();
-      List.iter (fun (head, args, _, rhs) ->
-        let rhs = Fun (args, rhs) in
-        emit_ln "(let ((scrutinee (let ()";
-        indent (); indent (); indent (); indent ();
-        emit_ln (go_expr rhs ^ ")))");
-        dedent (); dedent (); dedent ();
-        emit_ln (go_pat head ^ ")");
-        dedent ()
-      ) bs;
-      dedent ();
+      indent 2 (fun () ->
+        List.iter (fun (head, args, _, rhs) ->
+          let rhs = Fun (args, rhs) in
+          emit_ln "(let ((scrutinee (let ()";
+          indent 2 (fun () ->
+            indent 6 (fun () -> emit_ln (go_expr rhs ^ ")))"));
+            emit_ln (go_pat head ^ ")")
+          )
+        ) bs
+      );
       emit_ln " ))"
     in
     emit_ln "(load \"prelude.scm\")";
     emit_ln "";
     emit_ln "(call/cc (lambda (k)";
-    indent ();
-    emit_ln "(define (miniml-failure e)";
-    emit_ln "  (display (string-append \"MiniML failure: \" e))";
-    emit_ln "  (k '()))";
-    List.iter bindings decls;
-    dedent ();
+    indent 2 (fun () ->
+      emit_ln "(define (miniml-failure e)";
+      emit_ln "  (display (string-append \"MiniML failure: \" e))";
+      emit_ln "  (k '()))";
+      List.iter bindings decls
+    );
     emit_ln "))"
   in
   (match target with
