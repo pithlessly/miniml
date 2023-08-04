@@ -524,6 +524,8 @@ let parse: token list -> (ast, string) result =
 
   (* parsing expressions *)
   let rec expr0 : ast_expr option parser = fun input k ->
+    expr0' expr1 input k
+  and expr0' fallback : ast_expr option parser = fun input k ->
     match input with
     | KLet :: IdentSymbol s :: input ->
       let p' =
@@ -591,7 +593,7 @@ let parse: token list -> (ast, string) result =
           Fun (params, body)
         )))
       in p' input k
-    | _ -> expr1 input k
+    | _ -> fallback input k
   and expr1 = fun input k ->
     expr2 input (fun input first_operand_opt ->
     match first_operand_opt with
@@ -600,7 +602,7 @@ let parse: token list -> (ast, string) result =
       (* parse an operator and its RHS operand *)
       let next_operand: (string * ast_expr) option parser = fun input k ->
         let continue input s =
-          force "expected expression" expr2 input (fun input operand ->
+          force "expected expression" (expr0' expr2) input (fun input operand ->
           k input (Some (s, operand)))
         in
         match input with
