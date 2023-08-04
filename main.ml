@@ -1069,7 +1069,7 @@ let initial_ctx
     add "<>"  qa (a --> (a --> t_bool));
     add "=="  qa (a --> (a --> t_bool));
     add "^"   [] (t_string --> (t_string --> t_string));
-    add ";"   qab (a --> (b --> b));
+    add ";"   qa (t_unit --> (a --> a));
     add "min" [] (t_int --> (t_int --> t_int));
     add "fst" qab (CTCon (t_tuple, a :: b :: []) --> a);
     add "snd" qab (CTCon (t_tuple, a :: b :: []) --> b);
