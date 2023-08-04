@@ -806,7 +806,6 @@ let error_state_monad =
   and (>>=) g f = (fun s -> match g s with | Error e -> Error e | Ok (s, a) -> f a s)
   in (pure, (>>=))
 
-let deref = (!)
 let (>>=) x f = snd error_monad x f
 let (=<<) f x = (>>=) x f
 let (let*) x f = (>>=) x f
@@ -1083,9 +1082,9 @@ let initial_ctx
     add_con "false" [] [] t_bool;
     (
       let t_ref = ty1 "ref" in
-      add "ref" qa (a --> t_ref a);
-      add "!"   qa (t_ref a --> a);
-      add ":="  qa (t_ref a --> (a --> t_unit))
+      add "ref"   qa (a --> t_ref a);
+      add "deref" qa (t_ref a --> a);
+      add ":="    qa (t_ref a --> (a --> t_unit))
     );
     (* TODO: fix the parser so we can remove these parens *)
     (let t_list = ty1 "list" in

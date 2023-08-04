@@ -5,3 +5,5 @@ module Option = struct
   let map = Option.map
   let unwrap = Option.get
 end
+
+let deref = (!)
