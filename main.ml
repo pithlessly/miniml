@@ -782,7 +782,7 @@ let map_m
   let rec go ys xs =
     match xs with
     | [] -> pure (List.rev ys)
-    | x :: xs -> f x >>= (fun y -> go (y :: ys) xs)
+    | x :: xs -> f x >>= fun y -> go (y :: ys) xs
   in go []
 let fold_left_m
   ((pure  : 'b -> 'b_m),
@@ -792,7 +792,7 @@ let fold_left_m
   let rec go acc xs =
     match xs with
     | [] -> pure acc
-    | x :: xs -> f acc x >>= (fun y -> go y xs)
+    | x :: xs -> f acc x >>= fun y -> go y xs
   in go
 
 let state_monad =
@@ -1088,15 +1088,14 @@ let initial_ctx
       add "deref" qa (t_ref a --> a);
       add ":="    qa (t_ref a --> (a --> t_unit))
     );
-    (* TODO: fix the parser so we can remove these parens *)
-    (let t_list = ty1 "list" in
+    let t_list = ty1 "list" in
     add_con "::" qa (a :: t_list a :: []) (t_list a);
     add     "::" qa (a --> (t_list a --> t_list a));
     add     "@"  qa (t_list a --> (t_list a --> t_list a));
-    (let t_option = ty1 "option" in
+    let t_option = ty1 "option" in
     add_con "None" qa [] (t_option a);
     add_con "Some" qa (a :: []) (t_option a);
-    (let t_result = ty2 "result" in
+    let t_result = ty2 "result" in
     add_con "Ok"    qab (a :: []) (t_result a b);
     add_con "Error" qab (b :: []) (t_result a b);
     add_mod "List" (mk_ctx (fun add _ _ _ _ ->
@@ -1139,7 +1138,7 @@ let initial_ctx
         ()
       ))
     );
-    ())))
+    ()
   ) ""
 
 let preprocess_constructor_args
@@ -1838,12 +1837,12 @@ let compile (target : compile_target) (decls : core) : string =
           let locals = List.concat (List.map (fun (p, _) -> pat_local_vars p) branches) in
           emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals))
         );
-        (let scrutinee' = go_expr scrutinee in
+        let scrutinee' = go_expr scrutinee in
         let tv = tmp_var () in
         emit_ln ("(define " ^ tv ^ " (let ((scrutinee " ^ scrutinee' ^ "))");
         indent ();
         emit_ln "(cond";
-        (let last_is_t = ref false in
+        let last_is_t = ref false in
         List.iter (fun (pat, e) ->
           let pat' = go_pat pat in
           last_is_t := (pat' = "#t");
@@ -1856,7 +1855,7 @@ let compile (target : compile_target) (decls : core) : string =
         emit_ln (if deref last_is_t then " )))"
                                     else " (else (miniml-match-failure)))))");
         dedent ();
-        tv))
+        tv
       | IfThenElse (e_cond, e_then, e_else) ->
         let e_cond' = go_expr e_cond in
         let tv = tmp_var () in
@@ -1878,12 +1877,12 @@ let compile (target : compile_target) (decls : core) : string =
         let tv = tmp_var () in
         emit_ln ("(define " ^ tv ^ " (lambda (scrutinee)");
         indent ();
-        (let locals = pat_local_vars arg in
+        let locals = pat_local_vars arg in
         emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
         emit_ln ("(miniml-fun-guard " ^ go_pat arg ^ ")");
         emit_ln (go_expr body ^ "))");
         dedent ();
-        tv)
+        tv
       | Fun (arg :: args, body) ->
         go_expr (Fun (arg :: [], Fun (args, body)))
     and bindings (Bindings (_, bs)) =
