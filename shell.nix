@@ -4,6 +4,7 @@ let
 in
 pkgs.mkShell {
   buildInputs = [
+    chicken
     ocaml-ps.ocaml
     # ocaml-ps.core
     # ocaml-ps.core_extended
