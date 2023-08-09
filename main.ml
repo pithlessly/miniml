@@ -1629,10 +1629,20 @@ let elab (ast : ast) : (core, string) result =
       List.fold_left (fun acc (_, cg, _) -> acc && cg) true bindings in
     let bound_vars : core_var list =
       if not can_generalize then
-        bound_vars
+        (Miniml.debug (fun () ->
+          "defined: " ^
+            (String.concat "," (
+              List.map (fun (Binding (n, _, _, _, ty)) ->
+                n^":"^(show_ty ty)) bound_vars)));
+         bound_vars)
       else
         let types = List.map (fun (Binding (_, _, _, _, ty)) -> ty) bound_vars in
         let (qvars, types) = generalize lvl types in
+        Miniml.debug (fun () ->
+          "defined(gen): " ^
+            (String.concat "," (
+              List.map (fun (Binding (n, _, _, _, ty)) ->
+                n^":"^(show_ty ty)) bound_vars)));
         List.map2 (fun var ty ->
           let (Binding (name, id, prov, _, _)) = var in
           (* NOTE: What's going on here? We are allocating a "new" variable,
