@@ -135,17 +135,19 @@
 (define (miniml-Miniml.debug msg)
   (if (< miniml-Miniml.log_level 1) '()
     (miniml-prerr_endline
-      (string-append "\x1b[33m(debug)\x1b[m " (msg '())))))
+      (string-append "\033[33m(debug)\033[m " (msg '())))))
 (define (miniml-Miniml.trace msg)
   (if (< miniml-Miniml.log_level 2) '()
     (miniml-prerr_endline
-      (string-append "\x1b[33m(trace)\x1b[m " (msg '())))))
+      (string-append "\033[33m(trace)\033[m " (msg '())))))
 
 (define (miniml-match-failure)
   (error "no pattern in match expression matched"))
-(define (miniml-let-guard c)
-  (if c '()
-        (error "irrefutable pattern in let binding did not match")))
-(define (miniml-fun-guard c)
-  (if c '()
-        (error "irrefutable fun argument pattern did not match")))
+(define-syntax miniml-let-guard
+  (syntax-rules () ((miniml-let-guard c)
+   (define tmp (if c '()
+                     (error "irrefutable pattern in let binding did not match"))))))
+(define-syntax miniml-fun-guard
+  (syntax-rules () ((miniml-fun-guard c)
+   (define tmp (if c '()
+                     (error "irrefutable fun argument pattern did not match"))))))
