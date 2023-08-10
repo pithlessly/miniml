@@ -1,12 +1,30 @@
 (* Provides MiniML library functions not present in OCaml
    (to assist with bootstrapping). *)
 
+let deref = (!)
+
+module Char : sig
+  val (<=) : char -> char -> bool
+  val (>=) : char -> char -> bool
+  val (<)  : char -> char -> bool
+  val (>)  : char -> char -> bool
+end = struct
+  type cf = char -> char -> bool
+  let (<=) : cf = fun a b -> a <= b
+  let (>=) : cf = fun a b -> a >= b
+  let (<)  : cf = fun a b -> a < b
+  let (>)  : cf = fun a b -> a > b
+end
+
+let (<=) : int -> int -> bool = fun a b -> a <= b
+let (>=) : int -> int -> bool = fun a b -> a >= b
+let (<)  : int -> int -> bool = fun a b -> a < b
+let (>)  : int -> int -> bool = fun a b -> a > b
+
 module Option = struct
   let map = Option.map
   let unwrap = Option.get
 end
-
-let deref = (!)
 
 module Miniml = struct
   let log_level =

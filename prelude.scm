@@ -9,22 +9,16 @@
 (define miniml-+    (curry2 +))
 (define miniml--    (curry2 -))
 
-(define (make-ordered-comparison comp-int comp-char)
-  (lambda (a) (lambda (b)
-    (cond
-      ((integer? a) (comp-int a b))
-      ((char? a) (comp-char a b))
-      (else (error "the comparison functions claim to be polymorphic, but in reality we only support comparing ints and chars"))))))
-(define miniml->= (make-ordered-comparison >= char>=?))
-(define miniml-<= (make-ordered-comparison <= char<=?))
-(define miniml->  (make-ordered-comparison  >  char>?))
-(define miniml-<  (make-ordered-comparison  <  char<?))
+(define miniml->= (curry2 >=))
+(define miniml-<= (curry2 <=))
+(define miniml->  (curry2 >))
+(define miniml-<  (curry2 <))
 
 (define miniml-=
   (lambda (a) (lambda (b)
     (cond
       ((or (integer? a) (char? a) (string? a)) (equal? a b))
-      (else (error "the = function claims to be polymorphic, but in reality we only support comparint ints, chars, and strings"))))))
+      (else (error "the = function claims to be polymorphic, but in reality we only support comparing ints, chars, and strings"))))))
 (define miniml-<>
   (lambda (a) (lambda (b)
     (not ((miniml-= a) b)))))
@@ -106,6 +100,11 @@
 (define miniml-List.iter   (curry2 for-each))
 (define miniml-List.length length)
 (define miniml-List.concat (lambda (xss) (apply append xss)))
+
+(define miniml-Char.<= (curry2 char<=?))
+(define miniml-Char.>= (curry2 char>=?))
+(define miniml-Char.<  (curry2 char<?))
+(define miniml-Char.>  (curry2 char>?))
 
 (define miniml-String.length string-length)
 (define miniml-String.get (curry2 string-ref))
