@@ -71,9 +71,24 @@
         acc
         (loop ((f (car xs)) acc)
               (cdr xs))))))))
-(define miniml-List.map  (curry2 map))
-(define miniml-List.map2 (lambda (f) (lambda (xs) (lambda (ys)
-                           (map (lambda (x y) ((f x) y)) xs ys)))))
+; Avoid using Scheme builtin map since it doesn't guarantee evaluation order.
+; I didn't think this would be a problem, but Chez runs `f` on the elements
+; in reverse order.
+(define miniml-List.map
+  (lambda (f) (lambda (xs)
+    (let loop ((acc '()) (xs xs))
+      (if (null? xs)
+        (reverse acc)
+        (let ((y (f (car xs))))
+          (loop (cons y acc) (cdr xs))))))))
+(define miniml-List.map2
+  (lambda (f) (lambda (xs) (lambda (ys)
+    (let loop ((acc '()) (xs xs) (ys ys))
+      (cond
+        ((and (null? xs) (null? ys)) (reverse acc))
+        ((and (pair? xs) (pair? ys)) (let ((y ((f (car xs)) (car ys))))
+                                       (loop (cons y acc) (cdr xs) (cdr ys))))
+        (else (error "Lists differ in length"))))))))
 (define miniml-List.mapi
   (lambda (f) (lambda (xs)
     (let loop ((acc '()) (i 0) (xs xs))
