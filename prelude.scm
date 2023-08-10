@@ -37,6 +37,7 @@
     (else n)))
 (define miniml-string_of_int number->string)
 (define miniml-int_of_char char->integer)
+(define miniml-char_of_int integer->char)
 (define (miniml-print_endline s)
   (display s)
   (display "\n"))
