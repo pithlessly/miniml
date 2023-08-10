@@ -27,9 +27,9 @@ type token =
 
 let lex str =
   (* character properties *)
-  let lower c = ('a' <= c && c <= 'z') || c = '_' || c = '\'' in
-  let upper c = 'A' <= c && c <= 'Z' in
-  let numer c = '0' <= c && c <= '9' in
+  let lower c = Char.(('a' <= c && c <= 'z') || c = '_' || c = '\'') in
+  let upper c = Char.('A' <= c && c <= 'Z') in
+  let numer c = Char.('0' <= c && c <= '9') in
   let ident c = upper c || lower c || numer c in
   let symbolic c = match c with | '!' | '&' | '*' | '+' | '-' | '.' | ':'
                                 | '<' | '>' | '=' | '^' | '|' | '@' -> true
@@ -1061,10 +1061,10 @@ let initial_ctx
     add "+"   [] (t_int --> (t_int --> t_int));
     add "-"   [] (t_int --> (t_int --> t_int));
     (* TODO: make ordered comparisons int-specific *)
-    add ">="  qa (a --> (a --> t_bool));
-    add "<="  qa (a --> (a --> t_bool));
-    add ">"   qa (a --> (a --> t_bool));
-    add "<"   qa (a --> (a --> t_bool));
+    add ">="  [] (t_int --> (t_int --> t_bool));
+    add "<="  [] (t_int --> (t_int --> t_bool));
+    add ">"   [] (t_int --> (t_int --> t_bool));
+    add "<"   [] (t_int --> (t_int --> t_bool));
     add "="   qa (a --> (a --> t_bool));
     add "<>"  qa (a --> (a --> t_bool));
     add "=="  qa (a --> (a --> t_bool));
@@ -1109,6 +1109,13 @@ let initial_ctx
       add "iter"       qa   ((a --> t_unit) --> (t_list a --> t_unit));
       add "length"     qa   (t_list a --> t_int);
       add "concat"     qa   (t_list (t_list a) --> t_list a);
+      ()
+    ));
+    add_mod "Char" (mk_ctx (fun add _ _ _ _ ->
+      add ">=" [] (t_char --> (t_char --> t_bool));
+      add "<=" [] (t_char --> (t_char --> t_bool));
+      add ">"  [] (t_char --> (t_char --> t_bool));
+      add "<"  [] (t_char --> (t_char --> t_bool));
       ()
     ));
     add_mod "String" (mk_ctx (fun add _ _ _ _ ->
