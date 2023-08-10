@@ -49,6 +49,7 @@ let lex str =
     in
     match char i with
     | Some '\n'
+    | Some '\r'
     | Some ' ' -> go (i + 1) tokens
     | Some '"' ->
       let rec scan i parts escaped =
@@ -60,6 +61,7 @@ let lex str =
         | (Some '"',  true)  -> scan (i + 1) ("\"" :: parts) false
         | (Some '\\', true)  -> scan (i + 1) ("\\" :: parts) false
         | (Some 'n',  true)  -> scan (i + 1) ("\n" :: parts) false
+        | (Some 'r',  true)  -> scan (i + 1) ("\r" :: parts) false
         | (Some _,    true)  -> Error "invalid escape sequence in string literal"
       in
       (match scan (i + 1) [] false with
@@ -77,6 +79,7 @@ let lex str =
        | Some '\\' ->
          (match char (i + 2) with
           | Some 'n' -> char_done '\n' (i + 3)
+          | Some 'r' -> char_done '\r' (i + 3)
           | Some '\\' -> char_done '\\' (i + 3)
           | Some '\'' -> char_done '\'' (i + 3)
           | _ -> Error "invalid escape sequence in character literal")
@@ -1076,6 +1079,7 @@ let initial_ctx
     add "int_of_string" [] (t_string --> t_int);
     add "string_of_int" [] (t_int --> t_string);
     add "int_of_char"   [] (t_char --> t_int);
+    add "char_of_int"   [] (t_int --> t_char);
     add "print_endline" [] (t_string --> t_unit);
     add "prerr_endline" [] (t_string --> t_unit);
     add "invalid_arg" qa (t_string --> a);
@@ -1710,6 +1714,8 @@ let compile (target : compile_target) (decls : core) : string =
         "#\\space"
       else if c = '\n' then
         "#\\newline"
+      else if c = '\r' then
+        "#\\015"
       else
         invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
     and go_int = string_of_int
@@ -1720,6 +1726,7 @@ let compile (target : compile_target) (decls : core) : string =
                 | '"'  -> "\\\""
                 | '\\' -> "\\\\"
                 | '\n' -> "\\n"
+                | '\r' -> "\\r"
                 | c    -> let code = int_of_char c in
                           if 32 <= code && code < 128 then
                             String.make 1 c
