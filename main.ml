@@ -910,6 +910,11 @@ let map_fold_left (f : 'a -> (string * 'b) -> 'a) : 'a -> 'b string_map -> 'a =
                       | kv :: m -> go (f acc kv) m)
   in fun init (_, m) -> go init m
 
+type tvs = | TyvarScope of (string -> core_type option)
+let tvs_lookup (TyvarScope f) s = f s
+let tvs_from_map (m : core_type string_map) =
+  TyvarScope (fun s -> map_lookup s m)
+
 let rec occurs_check : core_uvar ref -> core_type -> (unit, string) result = fun v ty ->
   match ty with
   | CQVar _ -> Ok ()
@@ -1236,8 +1241,7 @@ let elab (ast : ast) : (core, string) result =
     and go_list acc types = List.fold_left go acc types
     in go_list map_empty
   in
-  let translate_ast_typ ctx : core_type string_map ->
-                              ast_typ -> (core_type, string) result =
+  let translate_ast_typ ctx tvs : ast_typ -> (core_type, string) result =
     (* substitute N types for N variables (QVars) in typ *)
     let rec subst (rho : (core_qvar * core_type) list) typ =
       match ground typ with
@@ -1250,10 +1254,10 @@ let elab (ast : ast) : (core, string) result =
         let* args' = map_m error_monad (subst rho) args in
         Ok (CTCon (c, args'))
     in
-    let rec go bindings typ =
+    let rec go typ =
       match typ with
-      | TVar s -> (match map_lookup s bindings with
-                   | None -> Error "impossible: we should have created suitable bindings?"
+      | TVar s -> (match tvs_lookup tvs s with
+                   | None -> Error ("(impossible?) binding not found for tvar: " ^ s)
                    | Some ty -> Ok ty)
       | TCon (name, args) ->
         match lookup_ty name ctx with
@@ -1264,7 +1268,7 @@ let elab (ast : ast) : (core, string) result =
             Error ("type constructor " ^ name ^ " expects " ^
                    string_of_int arity ^ " argument(s)")
           else
-            let* args' = map_m error_monad (go bindings) args in
+            let* args' = map_m error_monad go args in
             match decl with
             | CDatatype (_, _) -> Ok (CTCon (con, args'))
             | CAlias (_, _, params, definition) ->
@@ -1295,6 +1299,7 @@ let elab (ast : ast) : (core, string) result =
                              " has duplicate type parameter '" ^ s)
           ) map_empty ty_params_qvs
         in
+        let tvs = tvs_from_map ty_params_map in
         let ty_params = List.map snd ty_params_qvs in
         let* con = match lookup_ty name ctx with
                    | Some _ -> (* this check is not strictly necessary *)
@@ -1317,7 +1322,7 @@ let elab (ast : ast) : (core, string) result =
                         | Some _ -> (* we don't yet know how to disambiguate *)
                                     Error ("duplicate constructor name: " ^ name)
                         | None   -> Ok () in
-              let* param_tys' = map_m error_monad (translate_ast_typ ctx ty_params_map)
+              let* param_tys' = map_m error_monad (translate_ast_typ ctx tvs)
                                                   param_tys
               in Ok (extend_con ctx (
                 CBinding (name,
@@ -1332,7 +1337,7 @@ let elab (ast : ast) : (core, string) result =
           (* step 2 *)
           let add_aliases' ctx =
             let* ctx = add_aliases ctx in
-            let* ty' = translate_ast_typ ctx ty_params_map ty in
+            let* ty' = translate_ast_typ ctx tvs ty in
             Ok (extend_ty ctx (
               CAlias (con,
                       arity,
@@ -1469,7 +1474,7 @@ let elab (ast : ast) : (core, string) result =
                         let tyvars = ast_typ_bound_vars (ty :: []) in
                         let tyvars = map_map (fun s () -> CUVar (new_uvar lvl (Some s) ()))
                                              tyvars in
-                        let* ty' = translate_ast_typ ctx tyvars ty in
+                        let* ty' = translate_ast_typ ctx (tvs_from_map tyvars) ty in
                         let* () = unify ty1 ty' in
                         Ok (p', ty')
       | PWild        -> let ty = CUVar (new_uvar lvl None ()) in
@@ -1605,7 +1610,7 @@ let elab (ast : ast) : (core, string) result =
             | Some ty -> let tyvars = ast_typ_bound_vars (ty :: []) in
                          let tyvars = map_map (fun s () -> CUVar (new_uvar (lvl + 1) (Some s) ()))
                                               tyvars in
-                         let* ty' = translate_ast_typ ctx tyvars ty in
+                         let* ty' = translate_ast_typ ctx (tvs_from_map tyvars) ty in
                          unify ty_rhs ty'
           in
           let* () =
