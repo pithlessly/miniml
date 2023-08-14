@@ -1720,7 +1720,7 @@ let compile (target : compile_target) (decls : core) : string =
       else if c = '\n' then
         "#\\newline"
       else if c = '\r' then
-        "#\\015"
+        "(integer->char 13)"
       else
         invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
     and go_int = string_of_int
