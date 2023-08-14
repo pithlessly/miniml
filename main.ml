@@ -1077,11 +1077,11 @@ let initial_ctx
     add "not" [] (t_bool --> t_bool);
     add "+"   [] (t_int --> (t_int --> t_int));
     add "-"   [] (t_int --> (t_int --> t_int));
-    (* TODO: make ordered comparisons int-specific *)
     add ">="  [] (t_int --> (t_int --> t_bool));
     add "<="  [] (t_int --> (t_int --> t_bool));
     add ">"   [] (t_int --> (t_int --> t_bool));
     add "<"   [] (t_int --> (t_int --> t_bool));
+    (* TODO: figure out a better alternative to polymorphic physical equality *)
     add "="   qa (a --> (a --> t_bool));
     add "<>"  qa (a --> (a --> t_bool));
     add "=="  qa (a --> (a --> t_bool));
