@@ -1232,13 +1232,13 @@ let elab (ast : ast) : (core, string) result =
   and t_string = ty0 "string"
   and t_bool   = ty0 "bool"
   in
-  let new_uvar lvl name () : core_uvar ref =
+  let new_uvar lvl name () : core_type =
     let id = next_uvar_name () in
     let name = match name with
                | Some n -> n
                (* TODO: do this calculation lazily? *)
                | None   -> string_of_int id
-    in ref (Unknown (name, id, lvl))
+    in CUVar (ref (Unknown (name, id, lvl)))
   in
   let translate_ast_typ ctx tvs : ast_typ -> (core_type, string) result =
     (* substitute N types for N variables (QVars) in typ *)
@@ -1376,9 +1376,9 @@ let elab (ast : ast) : (core, string) result =
     let rec go ty = match ty with
                     | CQVar (QVar (n, id)) -> (
                       match List.find_opt (fun (QVar (_, id'), _) -> id = id') qvars with
-                      | None -> CUVar (new_uvar lvl (
-                                  Some ("<error: unexpected QVar here: " ^ n ^ ">")) ())
-                      | Some (_, uv) -> CUVar uv)
+                      | None -> new_uvar lvl (
+                                  Some ("<error: unexpected QVar here: " ^ n ^ ">")) ()
+                      | Some (_, uv) -> uv)
                     | CUVar r -> (
                       match deref r with
                       | Known ty -> go ty
@@ -1425,8 +1425,8 @@ let elab (ast : ast) : (core, string) result =
     fun lvl pat ->
       let* bindings = go pat in
       Ok (map_map
-        (fun s () -> let uv = CUVar (new_uvar lvl (Some s) ()) in
-                     Binding (s, next_var_id (), User, [], uv)
+        (fun s () ->
+          Binding (s, next_var_id (), User, [], new_uvar lvl (Some s) ())
         ) bindings)
   (* TODO: exhaustiveness checking? *)
   and infer_pat_with_vars lvl tvs ctx (bindings : core_var string_map) :
@@ -1442,7 +1442,7 @@ let elab (ast : ast) : (core, string) result =
         Ok (PTuple (List.map fst ps'),
             t_tuple (List.map snd ps'))
       | PList ps ->
-        let ty_elem = CUVar (new_uvar lvl None ()) in
+        let ty_elem = new_uvar lvl None () in
         let* ps' = map_m error_monad
                           (fun p ->
                             let* (p', ty_p) = go p in
@@ -1470,8 +1470,7 @@ let elab (ast : ast) : (core, string) result =
                         let* ty' = translate_ast_typ ctx tvs ty in
                         let* () = unify ty1 ty' in
                         Ok (p', ty')
-      | PWild        -> let ty = CUVar (new_uvar lvl None ()) in
-                        Ok (PWild, ty)
+      | PWild        -> Ok (PWild, new_uvar lvl None ())
     in go
   in
   let infer_pat lvl tvs : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
@@ -1492,7 +1491,7 @@ let elab (ast : ast) : (core, string) result =
       Ok (Tuple (List.map fst elab),
           t_tuple (List.map snd elab))
     | List es ->
-      let ty_elem = CUVar (new_uvar lvl None ()) in
+      let ty_elem = new_uvar lvl None () in
       let* es' = map_m error_monad
                         (fun e ->
                           let* (e', ty_e) = infer lvl ctx e in
@@ -1525,8 +1524,7 @@ let elab (ast : ast) : (core, string) result =
     | App (e1, e2) ->
       let* (e1', ty_fun) = infer lvl ctx e1 in
       let* (e2', ty_arg) = infer lvl ctx e2 in
-      let uv = new_uvar lvl None () in
-      let ty_res = CUVar uv in
+      let ty_res = new_uvar lvl None () in
       let* () = unify ty_fun (ty_arg --> ty_res) in
       Ok (App (e1', e2'), ground ty_res)
     | LetIn (bindings, e) ->
@@ -1534,8 +1532,8 @@ let elab (ast : ast) : (core, string) result =
       let* (e', ty_e) = infer lvl ctx' e in
       Ok (LetIn (bindings', e'), ground ty_e)
     | Match (e_scrut, cases) ->
-      let tvs = tvs_new_dynamic (fun s -> CUVar (new_uvar lvl (Some s) ())) () in
-      let ty_res = CUVar (new_uvar lvl None ()) in
+      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
+      let ty_res = new_uvar lvl None () in
       let* (e_scrut', ty_scrut) = infer lvl ctx e_scrut in
       let* cases' =
         map_m error_monad
@@ -1559,7 +1557,7 @@ let elab (ast : ast) : (core, string) result =
       let* ()             = unify ty_then ty_else in
       Ok (IfThenElse (e1', e2', e3'), ground ty_then)
     | Fun (pats, e) ->
-      let tvs = tvs_new_dynamic (fun s -> CUVar (new_uvar lvl (Some s) ())) () in
+      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
       let* (ctx', pats') = infer_pats lvl tvs ctx pats in
       let* (e', ty_res) = infer lvl ctx' e in
       Ok (
@@ -1569,7 +1567,7 @@ let elab (ast : ast) : (core, string) result =
   and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings, string) result =
     fun ctx (Bindings (is_rec, bindings)) ->
     let lvl' = lvl + 1 in
-    let tvs = tvs_new_dynamic (fun s -> CUVar (new_uvar lvl' (Some s) ())) () in
+    let tvs = tvs_new_dynamic (fun s -> new_uvar lvl' (Some s) ()) () in
     (* for each binding, determine the variables bound by the head *)
     let* bindings =
       map_m error_monad
