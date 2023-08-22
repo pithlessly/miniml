@@ -8,6 +8,8 @@
 (define miniml-not  not)
 (define miniml-+    (curry2 +))
 (define miniml--    (curry2 -))
+(define miniml-*    (curry2 *))
+(define miniml-/    (curry2 /))
 
 (define miniml->= (curry2 >=))
 (define miniml-<= (curry2 <=))

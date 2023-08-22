@@ -32,7 +32,7 @@ let lex str =
   let numer c = Char.('0' <= c && c <= '9') in
   let ident c = upper c || lower c || numer c in
   let symbolic c = match c with | '!' | '&' | '*' | '+' | '-' | '.' | ':'
-                                | '<' | '>' | '=' | '^' | '|' | '@' -> true
+                                | '<' | '>' | '=' | '^' | '|' | '@' | '/' -> true
                                 | _ -> false
   in
   (* main logic *)
@@ -635,7 +635,8 @@ let parse: token list -> (ast, string) result =
           | ':' -> (6, AssocRight operator_function)
           | '+' | '-'
                 -> (7, AssocLeft operator_function)
-          | '*' -> (8, AssocLeft operator_function)
+          | '*' | '/'
+                -> (8, AssocLeft operator_function)
           | _   -> invalid_arg ("can't determine precedence of operator '" ^ op ^ "'"))
       in
       k input (Some result)))
@@ -1077,6 +1078,8 @@ let initial_ctx
     add "not" [] (t_bool --> t_bool);
     add "+"   [] (t_int --> (t_int --> t_int));
     add "-"   [] (t_int --> (t_int --> t_int));
+    add "*"   [] (t_int --> (t_int --> t_int));
+    add "/"   [] (t_int --> (t_int --> t_int));
     add ">="  [] (t_int --> (t_int --> t_bool));
     add "<="  [] (t_int --> (t_int --> t_bool));
     add ">"   [] (t_int --> (t_int --> t_bool));
