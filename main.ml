@@ -246,14 +246,22 @@ let resolve_precedence (operands: 'a list) (operators: 'o list)
             let acc = x :: acc in
             match opers with
             | o' :: opers ->
-              (* FIXME: use of polymorphic compare is bad - this should
-               * be replaced by checking `operator_info o'` has the same
-               * precedence and verifying that its associativity is also
-               * AssocNone - we require that the caller doesn't try to
-               * declare two non-associative operators at the same
-               * precedence level *)
-              if o = o' then walk_nary acc xs opers
-                        else (acc, xs, o' :: opers)
+              let same_operator =
+                (* We formerly used (=) to check that o and o' were the same.
+                   In the interest of avoiding use of polymorphic comparison,
+                   we instead check that `operator_info o'` has the same
+                   precedence and verify that its associativity is also
+                   AssocNone - we require that the caller doesn't try to
+                   declare two non-associative operators at the same precedence
+                   level *)
+                match operator_info o' with
+                | (o'_prec, AssocNone _) -> o_prec = o'_prec
+                | (o'_prec, _) -> if o_prec = o'_prec then
+                                    invalid_arg "non-associative operators must be in their own precedence level"
+                                  else false
+              in
+              if same_operator then walk_nary acc xs opers
+                               else (acc, xs, o' :: opers)
             | [] -> (acc, xs, [])
           in
           let (args, xs, opers) = walk_nary (x :: []) xs opers in
