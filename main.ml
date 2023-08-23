@@ -1,3 +1,9 @@
+type span = | LineNo of int
+let dummy_span = LineNo (0 - 1)
+let describe_span (LineNo n) =
+  if n = 0 - 1 then "(dummy)"
+  else "(near line " ^ string_of_int n ^ ")"
+
 type token =
   | OpenParen
   | CloseParen
@@ -17,10 +23,10 @@ type token =
   | KMatch | KWith
   | KFun
   | KUnder
-  | IdentLower of string
-  | IdentUpper of string
-  | IdentSymbol of string
-  | IdentQuote of string
+  | IdentLower of string * span
+  | IdentUpper of string * span
+  | IdentSymbol of string * span
+  | IdentQuote of string * span
   | TkCharLit of char
   | TkIntLit of int
   | TkStrLit of string
@@ -36,16 +42,33 @@ let lex str =
                                 | _ -> false
   in
   (* main logic *)
-  let length = String.length str in
-  let char i = if i < length then Some (String.get str i) else None in
+  let latest_line = ref 1 in
+  let latest_idx = ref (0 - 1) in
+  let char =
+    let length = String.length str in
+    fun i ->
+    if i < length then
+      let c = String.get str i in
+      (if i > deref latest_idx then
+        if i <> deref latest_idx + 1 then
+          invalid_arg "lexer did not access tokens consecutively"
+        else
+          (latest_idx := i;
+           if c = '\n' then latest_line := deref latest_line + 1 else ())
+       else ());
+      Some c
+    else None
+  in
   let rec go i tokens =
     let adv t = go (i + 1) (t :: tokens) in
-    let take_range d (included : char -> bool) (mk_tok : string -> token) =
+    let take_range d (included : char -> bool) (mk_tok : span -> string -> token) =
       let rec scan d = match char (i + d) with
                        | Some c -> if included c then scan (d + 1) else d
                        | None -> d
       in
-      let d = scan d in go (i + d) (mk_tok (String.sub str i d) :: tokens)
+      let d = scan d in
+      let span = LineNo (deref latest_line) in
+      go (i + d) (mk_tok span (String.sub str i d) :: tokens)
     in
     match char i with
     | Some '\n'
@@ -72,7 +95,7 @@ let lex str =
         match char i with
         | None -> Error "expected trailing quote for character literal, got EOF"
         | Some '\'' -> go (i + 1) (TkCharLit c :: tokens)
-        | Some _ -> if lower c then take_range 1 ident (fun s -> IdentQuote s)
+        | Some _ -> if lower c then take_range 1 ident (fun sp s -> IdentQuote (s, sp))
                     else Error "unterminated character literal"
       in
       (match char (i + 1) with
@@ -101,28 +124,30 @@ let lex str =
     | Some ',' -> adv Comma
     | Some ';' -> adv Semicolon
     | Some c ->
-      let mk_lower_ident s = match s with
-                             | "true" -> KTrue | "false" -> KFalse
-                             | "type" -> KType | "of" -> KOf
-                             | "let" -> KLet | "rec" -> KRec
-                             | "and" -> KAnd | "in" -> KIn
-                             | "if" -> KIf | "then" -> KThen | "else" -> KElse
-                             | "match" -> KMatch | "with" -> KWith
-                             | "fun" -> KFun
-                             | "_" -> KUnder
-                             | _ -> IdentLower s
+      let mk_lower_ident sp s =
+        match s with
+        | "true" -> KTrue | "false" -> KFalse
+        | "type" -> KType | "of" -> KOf
+        | "let" -> KLet | "rec" -> KRec
+        | "and" -> KAnd | "in" -> KIn
+        | "if" -> KIf | "then" -> KThen | "else" -> KElse
+        | "match" -> KMatch | "with" -> KWith
+        | "fun" -> KFun
+        | "_" -> KUnder
+        | _ -> IdentLower (s, sp)
       in
-      let mk_symbolic_ident s = match s with
-                                | "."  -> Dot
-                                | ":"  -> Colon
-                                | "="  -> Equal
-                                | "|"  -> Pipe
-                                | "->" -> Arrow
-                                | _    -> IdentSymbol s
+      let mk_symbolic_ident sp s =
+        match s with
+        | "."  -> Dot
+        | ":"  -> Colon
+        | "="  -> Equal
+        | "|"  -> Pipe
+        | "->" -> Arrow
+        | _    -> IdentSymbol (s, sp)
       in
-      if upper c then take_range 0 ident (fun s -> IdentUpper s) else
+      if upper c then take_range 0 ident (fun sp s -> IdentUpper (s, sp)) else
       if lower c then take_range 0 ident mk_lower_ident else
-      if numer c then take_range 0 numer (fun s -> TkIntLit (int_of_string s)) else
+      if numer c then take_range 0 numer (fun _ s -> TkIntLit (int_of_string s)) else
       if symbolic c then take_range 0 symbolic mk_symbolic_ident else
         Error ("unexpected character: " ^ String.make 1 c
                ^ " at position: " ^ string_of_int i)
@@ -198,12 +223,12 @@ let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
                            | []     -> go_expr e
   in go
 
-type ast_typ = | TVar of string
+type ast_typ = | TVar of string (* * span *)
                | TCon of string * ast_typ list
-type ast_pat = (string, string, ast_typ) pat
-type ast_binding = (string, string, ast_typ) binding
-type ast_bindings = (string, string, ast_typ) bindings
-type ast_expr = (string, string, ast_typ) expr
+type ast_pat      = (string * span, string, ast_typ) pat
+type ast_binding  = (string * span, string, ast_typ) binding
+type ast_bindings = (string * span, string, ast_typ) bindings
+type ast_expr     = (string * span, string, ast_typ) expr
 type ast_typ_decl = | Datatype of (string * ast_typ list) list
                     | Alias    of ast_typ
 type ast_decl     = | Let      of ast_bindings
@@ -309,10 +334,11 @@ let parse: token list -> (ast, string) result =
   let ty_params: string list parser =
     fun input k ->
     match input with
-    | IdentQuote v :: input -> k input (v :: []) (* single variable *)
-    | OpenParen :: IdentQuote v1 :: input ->
+    (* TODO: care about spans in quoted identifiers? *)
+    | IdentQuote (v, _) :: input -> k input (v :: []) (* single variable *)
+    | OpenParen :: IdentQuote (v1, sp) :: input ->
       let rec go input vs = match input with
-                            | Comma :: IdentQuote v :: input -> go input (v :: vs)
+                            | Comma :: IdentQuote (v, _) :: input -> go input (v :: vs)
                             | CloseParen :: input -> k input (List.rev vs)
                             | _ -> Error "couldn't finish parsing type parameter list"
       in go input (v1 :: [])
@@ -320,14 +346,16 @@ let parse: token list -> (ast, string) result =
     | _ -> k input []
   in
   let ty_name: string parser =
-    fun input k -> match input with | IdentLower s :: Equal :: input -> k input s
+    (* TODO: care about spans of type names *)
+    fun input k -> match input with | IdentLower (s, _) :: Equal :: input -> k input s
                                     | _ -> Error "expected type name"
   in
   let rec ty_atomic: ast_typ parser =
     let ty_base input k =
       match input with
-      | IdentQuote v :: input -> k input (TVar v       :: [])
-      | IdentLower v :: input -> k input (TCon (v, []) :: [])
+      (* TODO: care about spans *)
+      | IdentQuote (v, _) :: input -> k input (TVar v       :: [])
+      | IdentLower (v, _) :: input -> k input (TCon (v, []) :: [])
       | OpenParen :: input ->
         let rec go input ts =
           match input with
@@ -343,7 +371,8 @@ let parse: token list -> (ast, string) result =
     (* parse out all suffixed type constructors *)
     let rec go input params =
       match input with
-      | IdentLower v :: input -> go input (TCon (v, params) :: [])
+      (* TODO: care about spans *)
+      | IdentLower (v, _) :: input -> go input (TCon (v, params) :: [])
       | _ -> match params with
              | [] -> invalid_arg "should be impossible"
              | t :: [] -> k input t
@@ -359,10 +388,10 @@ let parse: token list -> (ast, string) result =
       match input with
       | Arrow :: input ->
         go input ty_operands ("->" :: ty_operators)
-      | IdentSymbol "*" :: input ->
+      | IdentSymbol ("*", _) :: input ->
         go input ty_operands ("*" :: ty_operators)
-      | IdentSymbol op :: _ ->
-        Error ("invalid type operator: " ^ op)
+      | IdentSymbol (op, sp) :: _ ->
+        Error ("invalid type operator: " ^ op ^ " " ^ describe_span sp)
       | _ ->
         let ty_expr: ast_typ =
           resolve_precedence
@@ -389,17 +418,19 @@ let parse: token list -> (ast, string) result =
                 | Pipe :: _ ->
                   let rec adt_constructors input cs =
                     match input with
-                    | Pipe :: IdentUpper c :: KOf :: input ->
+                    (* TODO: use sp here *)
+                    | Pipe :: IdentUpper (c, sp) :: KOf :: input ->
                       let rec go input ts =
                         match input with
-                        | IdentSymbol "*" :: input ->
+                        | IdentSymbol ("*", _) :: input ->
                           ty_atomic input (fun input t -> go input (t :: ts))
                         | _ ->
                           adt_constructors input ((c, List.rev ts) :: cs)
                       (* artificially prepend "*" to the input stream
                          to simplify the parsing here *)
-                      in go (IdentSymbol "*" :: input) []
-                    | Pipe :: IdentUpper c :: input ->
+                      in go (IdentSymbol ("*", dummy_span) :: input) []
+                    (* TODO: use sp here *)
+                    | Pipe :: IdentUpper (c, sp) :: input ->
                       adt_constructors input ((c, []) :: cs)
                     | _ -> k input (Datatype (List.rev cs))
                   in adt_constructors input []
@@ -451,15 +482,16 @@ let parse: token list -> (ast, string) result =
     | TkCharLit c  :: input -> k input (Some (PCharLit c))
     | TkIntLit i   :: input -> k input (Some (PIntLit i))
     | TkStrLit s   :: input -> k input (Some (PStrLit s))
-    | IdentLower s :: input -> k input (Some (PVar s))
+    | IdentLower (s, sp)
+                   :: input -> k input (Some (PVar (s, sp)))
     | KUnder       :: input -> k input (Some PWild)
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (PList []))
     | OpenBracket  :: _     -> Error "only empty list literals are supported"
-    | OpenParen :: KLet :: IdentSymbol s :: CloseParen
-                   :: input -> k input (Some (PVar ("let" ^ s)))
-    | OpenParen :: IdentSymbol s :: CloseParen
-                   :: input -> k input (Some (PVar s))
+    | OpenParen :: KLet :: IdentSymbol (s, sp) :: CloseParen
+                   :: input -> k input (Some (PVar ("let" ^ s, sp))) (* FIXME: span is slightly wrong *)
+    | OpenParen :: IdentSymbol (s, sp) :: CloseParen
+                   :: input -> k input (Some (PVar (s, sp)))
     | OpenParen :: CloseParen
                    :: input -> k input (Some (PTuple []))
     | OpenParen    :: input -> pattern0 input (fun input e ->
@@ -471,7 +503,8 @@ let parse: token list -> (ast, string) result =
     (* NOTE: we don't have the same guard as in expr2 because we aren't bothering
        to handle the Module.(...) pattern syntax. *)
     match input with
-    | IdentUpper constructor :: input ->
+    | IdentUpper (constructor, sp) :: input ->
+      (* TODO: use sp here *)
       pattern3 input (fun input constructor_args_opt -> k input (
         (* See NOTE "constructor parsing hack" *)
         match constructor_args_opt with
@@ -493,10 +526,11 @@ let parse: token list -> (ast, string) result =
           k input (Some (s, operand)))
         in
         match input with
-        | Pipe             :: input -> continue input "|"
-        | IdentSymbol "::" :: input -> continue input "::"
-        | IdentSymbol s    :: input -> Error "invalid symbol in pattern: "
-        | _                         -> k input None
+        | Pipe                  :: input -> continue input "|"
+        | IdentSymbol ("::", _) :: input -> continue input "::"
+        | IdentSymbol (s, sp)   :: input -> Error ("invalid symbol in pattern: " ^ s
+                                                   ^ " " ^ describe_span sp)
+        | _                              -> k input None
       in
       many next_operand input (fun input (operands: (string * ast_pat) list) ->
       let operators = List.map fst operands in
@@ -538,7 +572,8 @@ let parse: token list -> (ast, string) result =
     expr0' expr1 input k
   and expr0' fallback : ast_expr option parser = fun input k ->
     match input with
-    | KLet :: IdentSymbol s :: input ->
+    | KLet :: IdentSymbol (s, sp) :: input ->
+      (* FIXME: span is slightly wrong *)
       let p' =
         seq (force "expected pattern" pattern3 @>
              equal                             @>
@@ -546,7 +581,7 @@ let parse: token list -> (ast, string) result =
              k_in                              @>
              force_expr                        @>
         fin (fun pat () rhs () rest -> Some (
-          App (App (Var ("let" ^ s), rhs),
+          App (App (Var ("let" ^ s, sp), rhs),
                Fun (pat :: [], rest))
         )))
       in
@@ -611,27 +646,28 @@ let parse: token list -> (ast, string) result =
     | None -> k input None
     | Some first_operand ->
       (* parse an operator and its RHS operand *)
-      let next_operand: (string * ast_expr) option parser = fun input k ->
-        let continue input s =
+      let next_operand: ((string * span) * ast_expr) option parser =
+        fun input k ->
+        let continue input s_and_sp =
           force "expected expression" (expr0' expr2) input (fun input operand ->
-          k input (Some (s, operand)))
+          k input (Some (s_and_sp, operand)))
         in
         match input with
-        | Comma         :: input -> continue input ","
-        | Equal         :: input -> continue input "="
-        | IdentSymbol s :: input -> continue input s
+        | Comma               :: input -> continue input (",", dummy_span)
+        | Equal               :: input -> continue input ("=", dummy_span)
+        | IdentSymbol (s, sp) :: input -> continue input (s,   sp)
         (* NOTE: we treat semicolon as only an operator because we don't
            handle semicolons in list literals *)
-        | Semicolon     :: input -> continue input ";"
-        | _                      -> k input None
+        | Semicolon           :: input -> continue input (";", dummy_span)
+        | _                            -> k input None
       in
-      many next_operand input (fun input (operands: (string * ast_expr) list) ->
+      many next_operand input (fun input (operands: ((string * span) * ast_expr) list) ->
       let operators = List.map fst operands in
       let operands = first_operand :: List.map snd operands in
       let result = resolve_precedence operands operators
-        (fun op ->
-          let operator_function l r = App (App (Var op, l), r) in
-          match String.get op 0 with
+        (fun (s, sp) ->
+          let operator_function l r = App (App (Var (s, sp), l), r) in
+          match String.get s 0 with
           | ';' -> (0, AssocRight operator_function)
           | ',' -> (1, AssocNone (fun es -> Tuple es))
           | '|' -> (2, AssocRight operator_function)
@@ -645,16 +681,18 @@ let parse: token list -> (ast, string) result =
                 -> (7, AssocLeft operator_function)
           | '*' | '/'
                 -> (8, AssocLeft operator_function)
-          | _   -> invalid_arg ("can't determine precedence of operator '" ^ op ^ "'"))
+          | _   -> invalid_arg ("can't determine precedence of operator '" ^ s ^ "' "
+                                ^ describe_span sp))
       in
       k input (Some result)))
   and expr2 = fun input k ->
     match (input, (match input with
-                   | IdentUpper _ :: Dot :: _ -> false
-                   | IdentUpper _        :: _ -> true
-                   |                        _ -> false))
+                   | IdentUpper (_, _) :: Dot :: _ -> false
+                   | IdentUpper (_, _)        :: _ -> true
+                   |                             _ -> false))
     with
-    | (IdentUpper constructor :: input, true) ->
+    | (IdentUpper (constructor, sp) :: input, true) ->
+      (* TODO: use sp *)
       expr3 input (fun input constructor_args_opt -> k input (
         (* NOTE "constructor parsing hack":
            The reader might be wondering: "isn't it hacky to detect
@@ -682,7 +720,8 @@ let parse: token list -> (ast, string) result =
     match input with
     | KTrue  :: input -> k input (Some (Con ("true", None)))
     | KFalse :: input -> k input (Some (Con ("false", None)))
-    | IdentUpper mod_name :: Dot :: input ->
+    | IdentUpper (mod_name, _) :: Dot :: input ->
+      (* TODO: care about spans *)
       (* NOTE: what we are dong here is desugaring
              Module.e = Module.(e) = let open Module in e
          This handles simple cases like `String.foo`, but incorrectly
@@ -692,18 +731,20 @@ let parse: token list -> (ast, string) result =
       force "expected expression" expr3 input (fun input sub_expr ->
         k input (Some (LetOpen (Module mod_name, sub_expr)))
       )
-    | IdentUpper s :: input -> k input (Some (Con (s, None))) (* duplicated from expr2 *)
+    | IdentUpper (s, sp) (* TODO: use sp *)
+                   :: input -> k input (Some (Con (s, None))) (* duplicated from expr2 *)
     | TkCharLit c  :: input -> k input (Some (CharLit c))
     | TkIntLit i   :: input -> k input (Some (IntLit i))
     | TkStrLit s   :: input -> k input (Some (StrLit s))
-    | IdentLower s :: input -> k input (Some (Var s))
+    | IdentLower (s, sp)
+                   :: input -> k input (Some (Var (s, sp)))
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (List []))
     | OpenBracket  :: _     -> Error "only empty list literals are supported"
-    | OpenParen :: KLet :: IdentSymbol s :: CloseParen
-                   :: input -> k input (Some (Var ("let" ^ s)))
-    | OpenParen :: IdentSymbol s :: CloseParen
-                   :: input -> k input (Some (Var s))
+    | OpenParen :: KLet :: IdentSymbol (s, sp) :: CloseParen (* FIXME: span is slightly wrong *)
+                   :: input -> k input (Some (Var ("let" ^ s, sp)))
+    | OpenParen :: IdentSymbol (s, sp) :: CloseParen
+                   :: input -> k input (Some (Var (s, sp)))
     | OpenParen :: CloseParen
                    :: input -> k input (Some (Tuple []))
     | OpenParen    :: input ->
@@ -1422,7 +1463,7 @@ let elab (ast : ast) : (core, string) result =
                                        | None    -> Ok map_empty)
       | PCharLit _ | PIntLit _ | PStrLit _
       | PWild        -> Ok map_empty
-      | PVar v       -> Ok (map_singleton (v, ()))
+      | PVar (v, _)  -> Ok (map_singleton (v, ()))
       | PAsc (p, _)  -> go p
     and go_list pats =
       List.fold_left merge (Ok map_empty) (List.map go pats)
@@ -1473,8 +1514,9 @@ let elab (ast : ast) : (core, string) result =
       | PCharLit c   -> Ok (PCharLit c, t_char)
       | PIntLit c    -> Ok (PIntLit c, t_int)
       | PStrLit c    -> Ok (PStrLit c, t_string)
-      | PVar s       -> (match map_lookup s bindings with
-                         | None   -> Error ("type variable not in scope: '" ^ s)
+      | PVar (s, sp) -> (match map_lookup s bindings with
+                         | None   -> Error ("unexpected variable in pattern: " ^ s
+                                            ^ " " ^ describe_span sp)
                          | Some v -> let (Binding (_, _, _, _, ty)) = v in
                                      Ok (PVar v, ty))
       | PAsc (p, ty) -> let* (p', ty1) = go p in
@@ -1522,12 +1564,13 @@ let elab (ast : ast) : (core, string) result =
     | CharLit c -> Ok (CharLit c, t_char)
     | IntLit i -> Ok (IntLit i, t_int)
     | StrLit s -> Ok (StrLit s, t_string)
-    | Var s -> (match lookup s ctx with
-                | None -> Error ("variable not in scope: " ^ s)
-                | Some v ->
-                  let (Binding (_, _, _, qvars, ty)) = v in
-                  let ty = instantiate lvl qvars () ty in
-                  Ok (Var v, ty))
+    | Var (s, sp) ->
+            (match lookup s ctx with
+            | None -> Error ("variable not in scope: " ^ s ^ " " ^ describe_span sp)
+            | Some v ->
+              let (Binding (_, _, _, qvars, ty)) = v in
+              let ty = instantiate lvl qvars () ty in
+              Ok (Var v, ty))
     | LetOpen (Module name, e) -> (
       match extend_open ctx name with
       | Some ctx -> infer lvl ctx e
