@@ -41,9 +41,9 @@ let lex str =
   let upper c = Char.('A' <= c && c <= 'Z') in
   let numer c = Char.('0' <= c && c <= '9') in
   let ident c = upper c || lower c || numer c in
-  let symbolic c = match c with | '!' | '&' | '*' | '+' | '-' | '.' | ':'
-                                | '<' | '>' | '=' | '^' | '|' | '@' | '/' -> true
-                                | _ -> false
+  let symbolic = function | '!' | '&' | '*' | '+' | '-' | '.' | ':'
+                          | '<' | '>' | '=' | '^' | '|' | '@' | '/' -> true
+                          | _ -> false
   in
   (* main logic *)
   let latest_line = ref 1 in
@@ -128,8 +128,8 @@ let lex str =
     | Some ',' -> adv Comma
     | Some ';' -> adv Semicolon
     | Some c ->
-      let mk_lower_ident sp s =
-        match s with
+      let mk_lower_ident sp =
+        function
         | "true" -> KTrue | "false" -> KFalse
         | "type" -> KType | "of" -> KOf
         | "let" -> KLet | "rec" -> KRec
@@ -139,16 +139,16 @@ let lex str =
         | "fun" -> KFun
         | "function" -> KFunction
         | "_" -> KUnder
-        | _ -> IdentLower (s, sp)
+        | s -> IdentLower (s, sp)
       in
-      let mk_symbolic_ident sp s =
-        match s with
+      let mk_symbolic_ident sp =
+        function
         | "."  -> Dot
         | ":"  -> Colon
         | "="  -> Equal
         | "|"  -> Pipe
         | "->" -> Arrow
-        | _    -> IdentSymbol (s, sp)
+        | s    -> IdentSymbol (s, sp)
       in
       if upper c then take_range 0 ident (fun sp s -> IdentUpper (s, sp)) else
       if lower c then take_range 0 ident mk_lower_ident else
@@ -211,8 +211,8 @@ and mod_expr =                 | Module of string
 
 let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
   (* TODO: the real value restriction is smarter *)
-  let rec go_expr e =
-    match e with
+  let rec go_expr =
+    function
     | Tuple es
     | List es
     | Con (_, Some es) -> List.fold_left (fun acc e -> acc || go_expr e) false es
@@ -404,11 +404,10 @@ let parse: token list -> ast m_result =
           resolve_precedence
             (List.rev ty_operands)
             (List.rev ty_operators)
-            (fun op ->
-              match op with
-              | "->" -> (0, AssocRight (fun l r -> TCon ("->", dummy_span, l :: r :: [])))
-              | "*"  -> (1, AssocNone (fun ts -> TCon ("*", dummy_span, ts)))
-              | _    -> invalid_arg "should be impossible")
+            (function
+             | "->" -> (0, AssocRight (fun l r -> TCon ("->", dummy_span, l :: r :: [])))
+             | "*"  -> (1, AssocNone (fun ts -> TCon ("*", dummy_span, ts)))
+             | _    -> invalid_arg "should be impossible")
         in k input ty_expr)
     in go input [] []
   in
@@ -542,8 +541,8 @@ let parse: token list -> ast m_result =
       many next_operand input (fun input (operands: (string * ast_pat) list) ->
       let operators = List.map fst operands in
       let operands = first_operand :: List.map snd operands in
-      let result = resolve_precedence operands operators (fun op ->
-        match op with
+      let result = resolve_precedence operands operators (
+        function
         | "|"  -> (0, AssocLeft (fun a b -> POr (a, b)))
         | "::" -> (1, AssocRight (fun a b -> PCon ("::", Some (a :: b :: []))))
         | _    -> invalid_arg "impossible operator")
@@ -982,12 +981,12 @@ let tvs_new_dynamic (new_ty : string -> core_type) () =
       cache := Option.unwrap (map_insert (s, ty) (deref cache));
       Some ty)
 
-let rec occurs_check : core_uvar ref -> core_type -> unit m_result = fun v ty ->
-  match ty with
+let rec occurs_check (v : core_uvar ref) : core_type -> unit m_result =
+  function
   | CQVar _ -> Ok ()
   | CTCon (_, tys) ->
-    let rec go tys =
-      match tys with
+    let rec go =
+      function
       | []         -> Ok ()
       | ty' :: tys -> let* () = occurs_check v ty' in go tys
     in go tys
@@ -1316,8 +1315,8 @@ let elab (ast : ast) : core m_result =
         let* args' = map_m error_monad (subst rho) args in
         Ok (CTCon (c, args'))
     in
-    let rec go typ =
-      match typ with
+    let rec go =
+      function
       | TVar (s, sp) ->
         (match tvs_lookup tvs s with
         | None -> Error (E ("(impossible?) binding not found for tvar: " ^ s
@@ -1464,8 +1463,8 @@ let elab (ast : ast) : core m_result =
      - traverse the pattern again, translating each identifier to its corresponding Var.
      *)
   let pat_bound_vars : core_level -> ast_pat -> core_var string_map m_result =
-    let rec go pat =
-      match pat with
+    let rec go =
+      function
       | POr (p1, p2) -> let* v1 = go p1 in
                         let* v2 = go p2 in
                         if map_eql (fun () () -> true) v1 v2 then Ok v1
@@ -1496,8 +1495,8 @@ let elab (ast : ast) : core m_result =
   (* TODO: exhaustiveness checking? *)
   and infer_pat_with_vars lvl tvs ctx (bindings : core_var string_map) :
                           ast_pat -> (core_pat * core_type) m_result =
-    let rec go pat =
-      match pat with
+    let rec go =
+      function
       | POr (p1, p2) -> let* (p1', ty1) = go p1 in
                         let* (p2', ty2) = go p2 in
                         let* () = unify ty1 ty2 in
@@ -1549,9 +1548,8 @@ let elab (ast : ast) : core m_result =
   let infer_pats lvl tvs : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list) m_result =
     Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl tvs)))
   in
-  let rec infer lvl : ctx -> ast_expr -> (core_expr * core_type) m_result =
-    fun ctx e ->
-    match e with
+  let rec infer lvl ctx : ast_expr -> (core_expr * core_type) m_result =
+    function
     | Tuple es ->
       let* elab = map_m error_monad (infer lvl ctx) es in
       Ok (Tuple (List.map fst elab),
@@ -1842,8 +1840,8 @@ let compile (target : compile_target) (decls : core) : string =
       | (User, _) -> "'" ^ name ^ string_of_int id
       | _ -> invalid_arg "builtin constructors are handled specially"
     in
-    let rec pat_local_vars p : core_var list =
-      match p with
+    let rec pat_local_vars : core_pat -> core_var list =
+      function
       | POr (p, _)   -> pat_local_vars p (* will be the same in both branches *)
       | PList ps
       | PTuple ps    -> List.concat (List.map pat_local_vars ps)
@@ -1853,9 +1851,9 @@ let compile (target : compile_target) (decls : core) : string =
       | PVar v       -> v :: []
       | PAsc (p, _)  -> invalid_arg "PAsc should not longer be present in core_pat"
     in
-    let rec go_pat p : string =
+    let rec go_pat : core_pat -> string =
       (* TODO: a lot of opportunities to generate more sensible/idiomatic code here *)
-      match p with
+      function
       | POr (p1, p2) -> "(or " ^ go_pat p1 ^ " " ^ go_pat p2 ^ ")"
       | PTuple [] -> "#t"
       | PTuple ps -> "(and" ^ (String.concat ""
@@ -1906,8 +1904,8 @@ let compile (target : compile_target) (decls : core) : string =
       | PAsc (p, _)  -> invalid_arg "PAsc should not longer be present in core_pat"
       | PWild -> "#t"
     in
-    let rec go_expr e : string =
-      match e with
+    let rec go_expr : core_expr -> string =
+      function
       | Tuple [] ->
         "'()"
       | Tuple es ->
