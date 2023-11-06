@@ -4,6 +4,9 @@ let describe_span (LineNo n) =
   if n = 0 - 1 then "(dummy)"
   else "(near line " ^ string_of_int n ^ ")"
 
+type error = | E of string
+type 'a m_result = ('a, error) result
+
 type token =
   | OpenParen
   | CloseParen
@@ -77,7 +80,7 @@ let lex str =
     | Some '"' ->
       let rec scan i parts escaped =
         match (char i, escaped) with
-        | (None, _) -> Error "expected trailing quote for string literal, got EOF"
+        | (None, _) -> Error (E "expected trailing quote for string literal, got EOF")
         | (Some '"',  false) -> Ok (i + 1, TkStrLit (String.concat "" (List.rev parts)))
         | (Some '\\', false) -> scan (i + 1) parts true
         | (Some c,    false) -> scan (i + 1) (String.make 1 c :: parts) false
@@ -85,7 +88,7 @@ let lex str =
         | (Some '\\', true)  -> scan (i + 1) ("\\" :: parts) false
         | (Some 'n',  true)  -> scan (i + 1) ("\n" :: parts) false
         | (Some 'r',  true)  -> scan (i + 1) ("\r" :: parts) false
-        | (Some _,    true)  -> Error "invalid escape sequence in string literal"
+        | (Some _,    true)  -> Error (E "invalid escape sequence in string literal")
       in
       (match scan (i + 1) [] false with
        | Error e -> Error e
@@ -93,10 +96,10 @@ let lex str =
     | Some '\'' ->
       let char_done c i =
         match char i with
-        | None -> Error "expected trailing quote for character literal, got EOF"
+        | None -> Error (E "expected trailing quote for character literal, got EOF")
         | Some '\'' -> go (i + 1) (TkCharLit c :: tokens)
         | Some _ -> if lower c then take_range 1 ident (fun sp s -> IdentQuote (s, sp))
-                    else Error "unterminated character literal"
+                    else Error (E "unterminated character literal")
       in
       (match char (i + 1) with
        | Some '\\' ->
@@ -105,9 +108,9 @@ let lex str =
           | Some 'r' -> char_done '\r' (i + 3)
           | Some '\\' -> char_done '\\' (i + 3)
           | Some '\'' -> char_done '\'' (i + 3)
-          | _ -> Error "invalid escape sequence in character literal")
+          | _ -> Error (E "invalid escape sequence in character literal"))
        | Some c -> char_done c (i + 2)
-       | _ -> Error "malformed character literal")
+       | _ -> Error (E "malformed character literal"))
     | Some '(' ->
       (match char (i + 1) with
        | Some '*' ->
@@ -115,7 +118,7 @@ let lex str =
              match (char i, char (i + 1)) with
              | (Some '*', Some ')') -> go (i + 2) tokens
              | (Some _,   _       ) -> scan (i + 1)
-             | (None,     _       ) -> Error "got EOF while scanning comment"
+             | (None,     _       ) -> Error (E "got EOF while scanning comment")
            in scan (i + 2)
        | _        -> adv OpenParen)
     | Some ')' -> adv CloseParen
@@ -149,8 +152,8 @@ let lex str =
       if lower c then take_range 0 ident mk_lower_ident else
       if numer c then take_range 0 numer (fun _ s -> TkIntLit (int_of_string s)) else
       if symbolic c then take_range 0 symbolic mk_symbolic_ident else
-        Error ("unexpected character: " ^ String.make 1 c
-               ^ " at position: " ^ string_of_int i)
+        Error (E ("unexpected character: " ^ String.make 1 c
+                  ^ " at position: " ^ string_of_int i))
     | None -> Ok (List.rev tokens)
   in
   go 0 []
@@ -223,8 +226,8 @@ let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
                            | []     -> go_expr e
   in go
 
-type ast_typ = | TVar of string (* * span *)
-               | TCon of string * ast_typ list
+type ast_typ = | TVar of string * span
+               | TCon of string * span * ast_typ list
 type ast_pat      = (string * span, string, ast_typ) pat
 type ast_binding  = (string * span, string, ast_typ) binding
 type ast_bindings = (string * span, string, ast_typ) bindings
@@ -300,8 +303,8 @@ let resolve_precedence (operands: 'a list) (operators: 'o list)
 
 type 'a parser =
   token list ->
-  (token list -> 'a -> (ast, string) result) ->
-  (ast, string) result
+  (token list -> 'a -> ast m_result) ->
+  ast m_result
 
 let pure x = fun input k -> k input x
 
@@ -319,7 +322,7 @@ let seq (Chain (p, f): ('f, 'f, 'a) chain): 'a parser =
   fun input k -> p input (fun input a_of_f -> k input (a_of_f f))
 let force (e: string) (p: 'a option parser): 'a parser =
   fun input k -> p input (fun input opt -> match opt with | Some x -> k input x
-                                                          | None -> Error e)
+                                                          | None -> Error (E e))
 let many (p: 'a option parser): 'a list parser =
   fun input k ->
     let rec go input acc = p input (fun input opt ->
@@ -329,7 +332,7 @@ let many (p: 'a option parser): 'a list parser =
     in go input []
 let dummy tok input = tok :: input
 
-let parse: token list -> (ast, string) result =
+let parse: token list -> ast m_result =
   (* parsing types *)
   let ty_params: string list parser =
     fun input k ->
@@ -340,43 +343,41 @@ let parse: token list -> (ast, string) result =
       let rec go input vs = match input with
                             | Comma :: IdentQuote (v, _) :: input -> go input (v :: vs)
                             | CloseParen :: input -> k input (List.rev vs)
-                            | _ -> Error "couldn't finish parsing type parameter list"
+                            | _ -> Error (E "couldn't finish parsing type parameter list")
       in go input (v1 :: [])
-    | OpenParen :: _ -> Error "expected type parameters"
+    | OpenParen :: _ -> Error (E "expected type parameters")
     | _ -> k input []
   in
   let ty_name: string parser =
     (* TODO: care about spans of type names *)
     fun input k -> match input with | IdentLower (s, _) :: Equal :: input -> k input s
-                                    | _ -> Error "expected type name"
+                                    | _ -> Error (E "expected type name")
   in
   let rec ty_atomic: ast_typ parser =
     let ty_base input k =
       match input with
-      (* TODO: care about spans *)
-      | IdentQuote (v, _) :: input -> k input (TVar v       :: [])
-      | IdentLower (v, _) :: input -> k input (TCon (v, []) :: [])
+      | IdentQuote (v, sp) :: input -> k input (TVar (v, sp) :: [])
+      | IdentLower (v, sp) :: input -> k input (TCon (v, sp, []) :: [])
       | OpenParen :: input ->
         let rec go input ts =
           match input with
           | Comma :: input -> ty input (fun input t -> go input (t :: ts))
           | CloseParen :: input -> k input (List.rev ts)
-          | _ -> Error "couldn't finish parsing type argument list"
+          | _ -> Error (E "couldn't finish parsing type argument list")
         (* artificially prepend "," to the input stream
            to simplify the parsing here *)
         in go (dummy Comma input) []
-      | _ -> Error "couldn't start parsing a type"
+      | _ -> Error (E "couldn't start parsing a type")
     in
     fun input k ->
     (* parse out all suffixed type constructors *)
     let rec go input params =
       match input with
-      (* TODO: care about spans *)
-      | IdentLower (v, _) :: input -> go input (TCon (v, params) :: [])
+      | IdentLower (v, sp) :: input -> go input (TCon (v, sp, params) :: [])
       | _ -> match params with
              | [] -> invalid_arg "should be impossible"
              | t :: [] -> k input t
-             | _ -> Error "you may have been trying to use Haskell tuple syntax"
+             | _ -> Error (E "you may have been trying to use Haskell tuple syntax")
     in ty_base input go
   and ty: ast_typ parser =
     fun input k ->
@@ -391,7 +392,7 @@ let parse: token list -> (ast, string) result =
       | IdentSymbol ("*", _) :: input ->
         go input ty_operands ("*" :: ty_operators)
       | IdentSymbol (op, sp) :: _ ->
-        Error ("invalid type operator: " ^ op ^ " " ^ describe_span sp)
+        Error (E ("invalid type operator: " ^ op ^ " " ^ describe_span sp))
       | _ ->
         let ty_expr: ast_typ =
           resolve_precedence
@@ -399,8 +400,8 @@ let parse: token list -> (ast, string) result =
             (List.rev ty_operators)
             (fun op ->
               match op with
-              | "->" -> (0, AssocRight (fun l r -> TCon ("->", l :: r :: [])))
-              | "*"  -> (1, AssocNone (fun ts -> TCon ("*", ts)))
+              | "->" -> (0, AssocRight (fun l r -> TCon ("->", dummy_span, l :: r :: [])))
+              | "*"  -> (1, AssocNone (fun ts -> TCon ("*", dummy_span, ts)))
               | _    -> invalid_arg "should be impossible")
         in k input ty_expr)
     in go input [] []
@@ -456,22 +457,22 @@ let parse: token list -> (ast, string) result =
                                                | _              -> k input false
   and equal  : unit parser
              = fun input k -> match input with | Equal :: input -> k input ()
-                                               | _              -> Error "expected '='"
+                                               | _              -> Error (E "expected '='")
   and arrow  : unit parser
              = fun input k -> match input with | Arrow :: input -> k input ()
-                                               | _              -> Error "expected '->'"
+                                               | _              -> Error (E "expected '->'")
   and k_in   : unit parser
              = fun input k -> match input with | KIn   :: input -> k input ()
-                                               | _              -> Error "expected 'in'"
+                                               | _              -> Error (E "expected 'in'")
   and k_then : unit parser
              = fun input k -> match input with | KThen :: input -> k input ()
-                                               | _              -> Error "expected 'then'"
+                                               | _              -> Error (E "expected 'then'")
   and k_else : unit parser
              = fun input k -> match input with | KElse :: input -> k input ()
-                                               | _              -> Error "expected 'else'"
+                                               | _              -> Error (E "expected 'else'")
   and k_with : unit parser
              = fun input k -> match input with | KWith :: input -> k input ()
-                                               | _              -> Error "expected 'with'"
+                                               | _              -> Error (E "expected 'with'")
   in
 
   (* parsing patterns *)
@@ -487,7 +488,7 @@ let parse: token list -> (ast, string) result =
     | KUnder       :: input -> k input (Some PWild)
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (PList []))
-    | OpenBracket  :: _     -> Error "only empty list literals are supported"
+    | OpenBracket  :: _     -> Error (E "only empty list literals are supported")
     | OpenParen :: KLet :: IdentSymbol (s, sp) :: CloseParen
                    :: input -> k input (Some (PVar ("let" ^ s, sp))) (* FIXME: span is slightly wrong *)
     | OpenParen :: IdentSymbol (s, sp) :: CloseParen
@@ -497,7 +498,7 @@ let parse: token list -> (ast, string) result =
     | OpenParen    :: input -> pattern0 input (fun input e ->
                                match input with
                                | CloseParen :: input -> k input (Some e)
-                               | _ -> Error "expected ')'")
+                               | _ -> Error (E "expected ')'"))
     | _                     -> k input None
   and pattern2 : ast_pat option parser = fun input k ->
     (* NOTE: we don't have the same guard as in expr2 because we aren't bothering
@@ -528,8 +529,8 @@ let parse: token list -> (ast, string) result =
         match input with
         | Pipe                  :: input -> continue input "|"
         | IdentSymbol ("::", _) :: input -> continue input "::"
-        | IdentSymbol (s, sp)   :: input -> Error ("invalid symbol in pattern: " ^ s
-                                                   ^ " " ^ describe_span sp)
+        | IdentSymbol (s, sp)   :: input -> Error (E ("invalid symbol in pattern: " ^ s
+                                                      ^ " " ^ describe_span sp))
         | _                              -> k input None
       in
       many next_operand input (fun input (operands: (string * ast_pat) list) ->
@@ -740,7 +741,7 @@ let parse: token list -> (ast, string) result =
                    :: input -> k input (Some (Var (s, sp)))
     | OpenBracket :: CloseBracket
                    :: input -> k input (Some (List []))
-    | OpenBracket  :: _     -> Error "only empty list literals are supported"
+    | OpenBracket  :: _     -> Error (E "only empty list literals are supported")
     | OpenParen :: KLet :: IdentSymbol (s, sp) :: CloseParen (* FIXME: span is slightly wrong *)
                    :: input -> k input (Some (Var ("let" ^ s, sp)))
     | OpenParen :: IdentSymbol (s, sp) :: CloseParen
@@ -751,7 +752,7 @@ let parse: token list -> (ast, string) result =
       force_expr input (fun input e ->
       match input with
       | CloseParen :: input -> k input (Some e)
-      | _ -> Error "expected ')'")
+      | _ -> Error (E "expected ')'"))
     | _ -> k input None
   and force_expr input k = force "Expected expression" expr0 input k
   and val_binding : ast_binding option parser = fun input k ->
@@ -788,7 +789,7 @@ let parse: token list -> (ast, string) result =
   fun tokens ->
   decls tokens (fun remaining ds ->
   match remaining with | [] -> Ok ds
-                       | _ -> Error "unexpected tokens at EOF")
+                       | _ -> Error (E "unexpected tokens at EOF"))
 
 type core_level = int
 type core_var_id = int
@@ -974,7 +975,7 @@ let tvs_new_dynamic (new_ty : string -> core_type) () =
       cache := Option.unwrap (map_insert (s, ty) (deref cache));
       Some ty)
 
-let rec occurs_check : core_uvar ref -> core_type -> (unit, string) result = fun v ty ->
+let rec occurs_check : core_uvar ref -> core_type -> unit m_result = fun v ty ->
   match ty with
   | CQVar _ -> Ok ()
   | CTCon (_, tys) ->
@@ -985,7 +986,7 @@ let rec occurs_check : core_uvar ref -> core_type -> (unit, string) result = fun
     in go tys
   | CUVar v' ->
     if v == v' then
-      Error "occurs check failed (cannot construct infinite type)"
+      Error (E "occurs check failed (cannot construct infinite type)")
     else
       match deref v' with
       | Known ty'                  -> occurs_check v ty'
@@ -1014,13 +1015,13 @@ let ground : core_type -> core_type =
     List.iter (fun r -> r := Known ty) obligations;
     ty
 
-let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
+let rec unify : core_type -> core_type -> unit m_result = fun t1 t2 ->
   (* FIXME: avoid physical equality on types? *)
   if t1 == t2 then Ok () else
   match (ground t1, ground t2) with
   | (CQVar qv, _) | (_, CQVar qv) ->
     let (QVar (name, a)) = qv in
-    Error ("found CQVar (" ^ name ^ " " ^ string_of_int a ^ ") - should be impossible")
+    Error (E ("found CQVar (" ^ name ^ " " ^ string_of_int a ^ ") - should be impossible"))
   | (CUVar r, t') | (t', CUVar r) ->
     (* r must be Unknown *)
     if
@@ -1035,13 +1036,13 @@ let rec unify : core_type -> core_type -> (unit, string) result = fun t1 t2 ->
   | (CTCon (c1, p1), CTCon (c2, p2)) ->
     let (CCon (n1, id1)) = c1 and (CCon (n2, id2)) = c2 in
     if id1 <> id2 then
-      Error ("cannot unify different type constructors: " ^ n1 ^ " != " ^ n2)
+      Error (E ("cannot unify different type constructors: " ^ n1 ^ " != " ^ n2))
     else unify_all p1 p2
-and unify_all : core_type list -> core_type list -> (unit, string) result = fun ts1 ts2 ->
+and unify_all : core_type list -> core_type list -> unit m_result = fun ts1 ts2 ->
   match (ts1, ts2) with
   | ([], []) -> Ok ()
   | (t1 :: ts1, t2 :: ts2) -> let* () = unify t1 t2 in unify_all ts1 ts2
-  | _ -> Error "cannot unify different numbers of arguments"
+  | _ -> Error (E "cannot unify different numbers of arguments")
 
 type ctx = | Ctx of core_var list         (* variables *)
                   * core_cvar list        (* constructors *)
@@ -1228,10 +1229,10 @@ let preprocess_constructor_args
   (* TODO: move into elab once we support generalizing nested functions *)
   (instantiate : core_qvar list -> unit -> core_type -> core_type)
   (mk_tuple : 'a list -> 'a) ctx name (args : 'a list option)
-  : (core_cvar * core_type list * core_type * 'a list, string) result =
+  : (core_cvar * core_type list * core_type * 'a list) m_result =
   let* cv =
     match lookup_con name ctx with
-    | None    -> Error ("constructor not in scope: " ^ name)
+    | None    -> Error (E ("constructor not in scope: " ^ name))
     | Some cv -> Ok cv
   in
   let (CBinding (_, _, _, qvars, param_tys, result_tys)) = cv in
@@ -1245,18 +1246,18 @@ let preprocess_constructor_args
     let num_params = List.length param_tys in
     match (num_params, args) with
     | (0, None)              -> Ok []
-    | (0, Some _)            -> Error ("constructor " ^ name ^ " must be applied to 0 arguments")
-    | (_, None)              -> Error ("constructor " ^ name ^ " must be applied to some arguments")
+    | (0, Some _)            -> Error (E ("constructor " ^ name ^ " must be applied to 0 arguments"))
+    | (_, None)              -> Error (E ("constructor " ^ name ^ " must be applied to some arguments"))
     | (1, Some (args :: [])) -> Ok (args :: [])
     | (1, Some args)         -> Ok (mk_tuple args :: [])
     | (_, Some args)         -> if num_params = List.length args
                                 then Ok args
-                                else Error ("constructor " ^ name
-                                            ^ " is applied to the wrong number of arguments")
+                                else Error (E ("constructor " ^ name
+                                               ^ " is applied to the wrong number of arguments"))
   in
   Ok (cv, param_tys, result_ty, args)
 
-let elab (ast : ast) : (core, string) result =
+let elab (ast : ast) : core m_result =
   let next_var_id = counter ()
   and next_uvar_name = counter ()
   and next_con_id = counter ()
@@ -1292,32 +1293,34 @@ let elab (ast : ast) : (core, string) result =
                | None   -> string_of_int id
     in CUVar (ref (Unknown (name, id, lvl)))
   in
-  let translate_ast_typ ctx tvs : ast_typ -> (core_type, string) result =
+  let translate_ast_typ ctx tvs : ast_typ -> core_type m_result =
     (* substitute N types for N variables (QVars) in typ *)
     let rec subst (rho : (core_qvar * core_type) list) typ =
       match ground typ with
       | CQVar (QVar (name, id)) ->
         (match List.find_opt (fun (QVar (_, id'), _) -> id = id') rho with
          | Some (_, ty) -> Ok ty
-         | None -> Error ("impossible: unknown qvar " ^ name ^ " while substituting"))
-      | CUVar _ -> Error "impossible: known types shouldn't have any unknown uvars?"
+         | None -> Error (E ("impossible: unknown qvar " ^ name ^ " while substituting")))
+      | CUVar _ -> Error (E "impossible: known types shouldn't have any unknown uvars?")
       | CTCon (c, args) ->
         let* args' = map_m error_monad (subst rho) args in
         Ok (CTCon (c, args'))
     in
     let rec go typ =
       match typ with
-      | TVar s -> (match tvs_lookup tvs s with
-                   | None -> Error ("(impossible?) binding not found for tvar: " ^ s)
-                   | Some ty -> Ok ty)
-      | TCon (name, args) ->
+      | TVar (s, sp) ->
+        (match tvs_lookup tvs s with
+        | None -> Error (E ("(impossible?) binding not found for tvar: " ^ s
+                            ^ " " ^ describe_span sp))
+        | Some ty -> Ok ty)
+      | TCon (name, sp, args) ->
         match lookup_ty name ctx with
-        | None -> Error ("type constructor not in scope: " ^ name)
+        | None -> Error (E ("type constructor not in scope: " ^ name))
         | Some decl ->
           let (CDatatype (con, arity) | CAlias (con, arity, _, _)) = decl in
           if arity <> List.length args && arity >= 0 then
-            Error ("type constructor " ^ name ^ " expects " ^
-                   string_of_int arity ^ " argument(s)")
+            Error (E ("type constructor " ^ name ^ " " ^ describe_span sp
+                      ^ " expects " ^ string_of_int arity ^ " argument(s)"))
           else
             let* args' = map_m error_monad go args in
             match decl with
@@ -1327,7 +1330,7 @@ let elab (ast : ast) : (core, string) result =
     in go
   in
   let translate_ast_typ_decl : (string list * string * ast_typ_decl) list ->
-                               ctx -> (ctx, string) result =
+                               ctx -> ctx m_result =
     (* we process a group of type declarations in several stages, to avoid
        creating cyclic type aliases:
        - extend the context with all the *declarations* of ADTs simultaneously;
@@ -1335,9 +1338,9 @@ let elab (ast : ast) : (core, string) result =
          current context and then extending the context;
        - extend the context with the constructors of all ADTs. *)
     fun decls ctx ->
-    let* ((add_adts    : ctx -> (ctx, string) result),
-          (add_aliases : ctx -> (ctx, string) result),
-          (add_conss   : ctx -> (ctx, string) result))
+    let* ((add_adts    : ctx -> ctx m_result),
+          (add_aliases : ctx -> ctx m_result),
+          (add_conss   : ctx -> ctx m_result))
     = fold_left_m error_monad (fun (add_adts, add_aliases, add_conss)
                                    (ty_params, name, decl) ->
         let arity = List.length ty_params in
@@ -1346,15 +1349,15 @@ let elab (ast : ast) : (core, string) result =
           fold_left_m error_monad (fun acc (s, qv) ->
             match map_insert (s, CQVar qv) acc with
             | Some map -> Ok map
-            | None -> Error ("type declaration " ^ name ^
-                             " has duplicate type parameter '" ^ s)
+            | None -> Error (E ("type declaration " ^ name ^
+                                " has duplicate type parameter '" ^ s))
           ) map_empty ty_params_qvs
         in
         let tvs = tvs_from_map ty_params_map in
         let ty_params = List.map snd ty_params_qvs in
         let* con = match lookup_ty name ctx with
                    | Some _ -> (* this check is not strictly necessary *)
-                               Error ("duplicate type name: " ^ name)
+                               Error (E ("duplicate type name: " ^ name))
                    | None   -> Ok (CCon (name, next_con_id ()))
         in
         match decl with
@@ -1371,7 +1374,7 @@ let elab (ast : ast) : (core, string) result =
             fold_left_m error_monad (fun ctx (name, param_tys) ->
               let* () = match lookup_con name ctx with
                         | Some _ -> (* we don't yet know how to disambiguate *)
-                                    Error ("duplicate constructor name: " ^ name)
+                                    Error (E ("duplicate constructor name: " ^ name))
                         | None   -> Ok () in
               let* param_tys' = map_m error_monad (translate_ast_typ ctx tvs)
                                                   param_tys
@@ -1450,13 +1453,13 @@ let elab (ast : ast) : (core, string) result =
      - create a new Var (with ids and new uvars for types) for each bound variable;
      - traverse the pattern again, translating each identifier to its corresponding Var.
      *)
-  let pat_bound_vars : core_level -> ast_pat -> (core_var string_map, string) result =
+  let pat_bound_vars : core_level -> ast_pat -> core_var string_map m_result =
     let rec go pat =
       match pat with
       | POr (p1, p2) -> let* v1 = go p1 in
                         let* v2 = go p2 in
                         if map_eql (fun () () -> true) v1 v2 then Ok v1
-                        else Error "branches do not bind the same variables"
+                        else Error (E "branches do not bind the same variables")
       | PTuple ps    -> go_list ps
       | PList ps     -> go_list ps
       | PCon (_, ps) -> (match ps with | Some ps -> go_list ps
@@ -1472,7 +1475,7 @@ let elab (ast : ast) : (core, string) result =
       let* v2 = ev2 in
       match map_disjoint_union v1 v2 with
       | Ok v' -> Ok v'
-      | Error (DupErr v) -> Error "variable bound multiple times in the same pattern: v"
+      | Error (DupErr v) -> Error (E "variable bound multiple times in the same pattern: v")
     in
     fun lvl pat ->
       let* bindings = go pat in
@@ -1482,7 +1485,7 @@ let elab (ast : ast) : (core, string) result =
         ) bindings)
   (* TODO: exhaustiveness checking? *)
   and infer_pat_with_vars lvl tvs ctx (bindings : core_var string_map) :
-                          ast_pat -> (core_pat * core_type, string) result =
+                          ast_pat -> (core_pat * core_type) m_result =
     let rec go pat =
       match pat with
       | POr (p1, p2) -> let* (p1', ty1) = go p1 in
@@ -1515,8 +1518,8 @@ let elab (ast : ast) : (core, string) result =
       | PIntLit c    -> Ok (PIntLit c, t_int)
       | PStrLit c    -> Ok (PStrLit c, t_string)
       | PVar (s, sp) -> (match map_lookup s bindings with
-                         | None   -> Error ("unexpected variable in pattern: " ^ s
-                                            ^ " " ^ describe_span sp)
+                         | None   -> Error (E ("unexpected variable in pattern: " ^ s
+                                               ^ " " ^ describe_span sp))
                          | Some v -> let (Binding (_, _, _, _, ty)) = v in
                                      Ok (PVar v, ty))
       | PAsc (p, ty) -> let* (p', ty1) = go p in
@@ -1526,17 +1529,17 @@ let elab (ast : ast) : (core, string) result =
       | PWild        -> Ok (PWild, new_uvar lvl None ())
     in go
   in
-  let infer_pat lvl tvs : ctx -> ast_pat -> (ctx * (core_pat * core_type), string) result =
+  let infer_pat lvl tvs : ctx -> ast_pat -> (ctx * (core_pat * core_type)) m_result =
     fun ctx pat ->
     let* bindings = pat_bound_vars lvl pat in
     let* pat' = infer_pat_with_vars lvl tvs ctx bindings pat in
     let ctx' = map_fold_left (fun ctx (_, v) -> extend ctx v) ctx bindings in
     Ok (ctx', pat')
   in
-  let infer_pats lvl tvs : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list, string) result =
+  let infer_pats lvl tvs : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list) m_result =
     Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl tvs)))
   in
-  let rec infer lvl : ctx -> ast_expr -> (core_expr * core_type, string) result =
+  let rec infer lvl : ctx -> ast_expr -> (core_expr * core_type) m_result =
     fun ctx e ->
     match e with
     | Tuple es ->
@@ -1566,7 +1569,7 @@ let elab (ast : ast) : (core, string) result =
     | StrLit s -> Ok (StrLit s, t_string)
     | Var (s, sp) ->
             (match lookup s ctx with
-            | None -> Error ("variable not in scope: " ^ s ^ " " ^ describe_span sp)
+            | None -> Error (E ("variable not in scope: " ^ s ^ " " ^ describe_span sp))
             | Some v ->
               let (Binding (_, _, _, qvars, ty)) = v in
               let ty = instantiate lvl qvars () ty in
@@ -1574,7 +1577,7 @@ let elab (ast : ast) : (core, string) result =
     | LetOpen (Module name, e) -> (
       match extend_open ctx name with
       | Some ctx -> infer lvl ctx e
-      | None     -> Error ("module not in scope: " ^ name))
+      | None     -> Error (E ("module not in scope: " ^ name)))
     | App (e1, e2) ->
       let* (e1', ty_fun) = infer lvl ctx e1 in
       let* (e2', ty_arg) = infer lvl ctx e2 in
@@ -1618,7 +1621,7 @@ let elab (ast : ast) : (core, string) result =
         Fun (List.map fst pats', e'),
         List.fold_right (fun (_, ty1) ty2 -> (ty1 --> ty2)) pats' ty_res
       )
-  and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings, string) result =
+  and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings) m_result =
     fun ctx (Bindings (is_rec, bindings)) ->
     let lvl' = lvl + 1 in
     let tvs = tvs_new_dynamic (fun s -> new_uvar lvl' (Some s) ()) () in
@@ -1637,7 +1640,7 @@ let elab (ast : ast) : (core, string) result =
       match fold_left_m error_monad map_disjoint_union map_empty sets with
       | Ok combined      -> Ok combined
       | Error (DupErr v) ->
-        Error ("variable bound multiple times in a group of definitions: " ^ v)
+        Error (E ("variable bound multiple times in a group of definitions: " ^ v))
     in
     (* the context used for the bindings contains these variables iff the binding group
        is recursive *)
@@ -1670,7 +1673,7 @@ let elab (ast : ast) : (core, string) result =
             if not (could_have_side_effects binding) then
               Ok true
             else if is_rec then
-              Error "recursive bindings cannot have side effects"
+              Error (E "recursive bindings cannot have side effects")
             else
               Ok false
           in
@@ -1997,5 +2000,5 @@ let text =
 let () =
   Miniml.trace (fun () -> "Log level: " ^ string_of_int Miniml.log_level);
   match elab =<< (parse =<< lex text) with
-  | Ok core -> print_endline (compile Scheme core)
-  | Error e -> (prerr_endline ("Error: " ^ e); exit 1)
+  | Ok core     -> print_endline (compile Scheme core)
+  | Error (E e) -> (prerr_endline ("Error: " ^ e); exit 1)
