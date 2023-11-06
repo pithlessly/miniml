@@ -25,6 +25,7 @@ type token =
   | KIf | KThen | KElse
   | KMatch | KWith
   | KFun
+  | KFunction
   | KUnder
   | IdentLower of string * span
   | IdentUpper of string * span
@@ -136,6 +137,7 @@ let lex str =
         | "if" -> KIf | "then" -> KThen | "else" -> KElse
         | "match" -> KMatch | "with" -> KWith
         | "fun" -> KFun
+        | "function" -> KFunction
         | "_" -> KUnder
         | _ -> IdentLower (s, sp)
       in
@@ -202,6 +204,9 @@ and  ('var, 'con, 'ty) expr =
                                              * ('var, 'con, 'ty) expr
                                | Fun        of ('var, 'con, 'ty) pat list
                                              * ('var, 'con, 'ty) expr
+                               | Function   of ( ('var, 'con, 'ty) pat
+                                               * ('var, 'con, 'ty) expr
+                                               ) list
 and mod_expr =                 | Module of string
 
 let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
@@ -217,6 +222,7 @@ let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
     | StrLit _
     | Var _
     | Fun (_, _) -> false
+    | Function _ -> false
     | LetIn (Bindings (_, bs), e) ->
       List.fold_left (fun acc b -> acc || go b) false bs
       || go_expr e
@@ -612,17 +618,6 @@ let parse: token list -> ast m_result =
         )))
       in p' input k
     | KMatch :: input ->
-      let branch : (ast_pat * ast_expr) option parser = fun input k ->
-        match input with
-        | Pipe :: input ->
-          let p' =
-            seq (pattern0   @>
-                 arrow      @>
-                 force_expr @>
-            fin (fun pat () expr -> Some (pat, expr)))
-          in p' input k
-        | _ -> k input None
-      in
       let p' =
         seq (force_expr  @>
              k_with      @>
@@ -640,7 +635,19 @@ let parse: token list -> ast m_result =
           Fun (params, body)
         )))
       in p' input k
+    | KFunction :: input ->
+      many branch input (fun input branches -> k input (Some (Function branches)))
     | _ -> fallback input k
+  and branch : (ast_pat * ast_expr) option parser = fun input k ->
+    match input with
+    | Pipe :: input ->
+      let p' =
+        seq (pattern0   @>
+             arrow      @>
+             force_expr @>
+        fin (fun pat () expr -> Some (pat, expr)))
+      in p' input k
+    | _ -> k input None
   and expr1 = fun input k ->
     expr2 input (fun input first_operand_opt ->
     match first_operand_opt with
@@ -1293,6 +1300,9 @@ let elab (ast : ast) : core m_result =
                | None   -> string_of_int id
     in CUVar (ref (Unknown (name, id, lvl)))
   in
+  let anon_var ty () : core_var =
+    Binding ("<anonymous>", next_var_id (), User, [], ty)
+  in
   let translate_ast_typ ctx tvs : ast_typ -> core_type m_result =
     (* substitute N types for N variables (QVars) in typ *)
     let rec subst (rho : (core_qvar * core_type) list) typ =
@@ -1620,6 +1630,25 @@ let elab (ast : ast) : core m_result =
       Ok (
         Fun (List.map fst pats', e'),
         List.fold_right (fun (_, ty1) ty2 -> (ty1 --> ty2)) pats' ty_res
+      )
+    | Function cases ->
+      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
+      let ty_res = new_uvar lvl None () in
+      let ty_arg = new_uvar lvl None () in
+      let* cases' =
+        map_m error_monad
+            (fun (pat, e) ->
+              let* (ctx', (pat', ty_pat)) = infer_pat lvl tvs ctx pat in
+              let* ()                     = unify ty_pat ty_arg       in
+              let* (e', ty_e)             = infer lvl ctx' e          in
+              let* ()                     = unify ty_e ty_res         in
+              Ok (pat', e'))
+            cases
+      in
+      let param = anon_var ty_arg () in
+      Ok (
+        Fun (PVar param :: [], Match (Var param, cases')),
+        ground ty_arg --> ground ty_res
       )
   and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings) m_result =
     fun ctx (Bindings (is_rec, bindings)) ->
@@ -1966,6 +1995,8 @@ let compile (target : compile_target) (decls : core) : string =
         tv
       | Fun (arg :: args, body) ->
         go_expr (Fun (arg :: [], Fun (args, body)))
+      | Function _ ->
+        invalid_arg "Function should no longer be present in core_expr"
     and bindings (Bindings (_, bs)) =
       (* TODO: if the bindings aren't recursive, we can declare all these one binding a time *)
       let locals = List.concat (List.map (fun (p, _, _, _) -> pat_local_vars p) bs) in
