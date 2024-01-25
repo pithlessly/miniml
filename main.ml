@@ -1228,6 +1228,11 @@ let initial_ctx
       add "trace" [] ((t_unit --> t_string) --> t_unit);
       ()
     ));
+    let t_void = ty0 "void" in
+    add_mod "Void" (mk_ctx (fun add _ _ _ _ ->
+      add "absurd" qa (t_void --> a);
+      ()
+    ));
     ()
   ) ""
 

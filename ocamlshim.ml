@@ -41,3 +41,12 @@ module Miniml = struct
     if log_level < 2 then () else
       prerr_endline ("\x1b[33m(b trace)\x1b[m " ^ msg ())
 end
+
+module Void : sig
+  type void (* left abstract so that it is opaque to the totality checker *)
+  val absurd : void -> 'a
+end = struct
+  type void = |
+  let absurd (v : void) = match v with _ -> .
+end
+type void = Void.void
