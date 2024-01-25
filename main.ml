@@ -175,7 +175,7 @@ type ('var, 'con, 'ty) pat =
                                | PWild
 type ('var, 'con, 'ty) binding = ('var, 'con, 'ty) pat      (* head pattern *)
                                * ('var, 'con, 'ty) pat list (* argument patterns *)
-                               * 'ty option              (* return type annotation *)
+                               * 'ty option                 (* return type annotation *)
                                * ('var, 'con, 'ty) expr     (* RHS *)
 and  ('var, 'con, 'ty) bindings =
                                | Bindings of bool (* recursive? *)
@@ -823,10 +823,10 @@ type core_cvar = | CBinding of string (* name in the syntax *)
                              * core_type list (* parameter types *)
                              * core_type      (* return type *)
 
-type core_pat = (core_var, core_cvar, unit) pat
-type core_binding = (core_var, core_cvar, unit) binding
-type core_bindings = (core_var, core_cvar, unit) bindings
-type core_expr = (core_var, core_cvar, unit) expr
+type core_pat      = (core_var, core_cvar, void) pat
+type core_binding  = (core_var, core_cvar, void) binding
+type core_bindings = (core_var, core_cvar, void) bindings
+type core_expr     = (core_var, core_cvar, void) expr
 type core_tydecl = | CDatatype of core_con * int (* arity *)
                    | CAlias    of core_con * int (* name and arity *)
                                 * core_qvar list (* parameters *)
@@ -1854,7 +1854,7 @@ let compile (target : compile_target) (decls : core) : string =
       | PCharLit _ | PIntLit _ | PStrLit _
       | PWild        -> []
       | PVar v       -> v :: []
-      | PAsc (p, _)  -> invalid_arg "PAsc should not longer be present in core_pat"
+      | PAsc (_, vd) -> Void.absurd vd
     in
     let rec go_pat : core_pat -> string =
       (* TODO: a lot of opportunities to generate more sensible/idiomatic code here *)
@@ -1906,7 +1906,7 @@ let compile (target : compile_target) (decls : core) : string =
       | PIntLit i -> "(= scrutinee " ^ go_int i ^ ")"
       | PStrLit s -> "(string=? scrutinee " ^ go_str s ^ ")"
       | PVar v -> "(begin (set! " ^ go_var v ^ " scrutinee) #t)"
-      | PAsc (p, _)  -> invalid_arg "PAsc should not longer be present in core_pat"
+      | PAsc (_, vd) -> Void.absurd vd
       | PWild -> "#t"
     in
     let rec go_expr : core_expr -> string =
