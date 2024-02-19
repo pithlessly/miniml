@@ -1203,6 +1203,11 @@ let initial_ctx
       add "make"   [] (t_int --> (t_char --> t_string));
       ()
     ));
+    let t_void = ty0 "void" in
+    add_mod "Void" (mk_ctx (fun add _ _ _ _ ->
+      add "absurd" qa (t_void --> a);
+      ()
+    ));
     add_mod "Fun" (mk_ctx (fun add _ _ _ _ ->
       add "id"   qa   (a --> a);
       add "flip" qabc ((a --> (b --> c)) --> (b --> (a --> c)));
@@ -1226,11 +1231,6 @@ let initial_ctx
       add "log_level" [] t_int;
       add "debug" [] ((t_unit --> t_string) --> t_unit);
       add "trace" [] ((t_unit --> t_string) --> t_unit);
-      ()
-    ));
-    let t_void = ty0 "void" in
-    add_mod "Void" (mk_ctx (fun add _ _ _ _ ->
-      add "absurd" qa (t_void --> a);
       ()
     ));
     ()
