@@ -189,7 +189,7 @@ and  ('var, 'con, 'ty) expr =
                                | IntLit     of int
                                | StrLit     of string
                                | Var        of 'var
-                               | LetOpen    of mod_expr
+                               | OpenIn     of mod_expr
                                              * ('var, 'con, 'ty) expr
                                | App        of ('var, 'con, 'ty) expr
                                              * ('var, 'con, 'ty) expr
@@ -736,7 +736,7 @@ let parse: token list -> ast m_result =
              List.String.print_endline = print_endline
          *)
       force "expected expression" expr3 input (fun input sub_expr ->
-        k input (Some (LetOpen (Module mod_name, sub_expr)))
+        k input (Some (OpenIn (Module mod_name, sub_expr)))
       )
     | IdentUpper (s, sp) (* TODO: use sp *)
                    :: input -> k input (Some (Con (s, None))) (* duplicated from expr2 *)
@@ -1605,7 +1605,7 @@ let elab (ast : ast) : core m_result =
               let (Binding (_, _, _, qvars, ty)) = v in
               let ty = instantiate lvl qvars () ty in
               Ok (Var v, ty))
-    | LetOpen (Module name, e) -> (
+    | OpenIn (Module name, e) -> (
       match extend_open ctx name with
       | Some ctx -> infer lvl ctx e
       | None     -> Error (E ("module not in scope: " ^ name)))
@@ -1961,8 +1961,8 @@ let compile (target : compile_target) (decls : core) : string =
       | StrLit s -> go_str s
       | Var v ->
         go_var v
-      | LetOpen (_, _) ->
-        invalid_arg "LetOpen should no longer be present in core_expr"
+      | OpenIn (_, _) ->
+        invalid_arg "OpenIn should no longer be present in core_expr"
       | App (e1, e2) ->
         let e1' = go_expr e1 in
         let e2' = go_expr e2 in
