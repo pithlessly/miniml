@@ -1227,6 +1227,24 @@ let initial_ctx
         ()
       ))
     );
+    add_mod "StringMap" (mk_ctx (fun add add_con add_ty _ _ ->
+      let ty0 name = CTCon (add_ty name 0, [])
+      and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
+      in
+      let t = ty1 "string_map" in
+      let kv a = CTCon (t_tuple, t_string :: a :: []) in
+      add "empty"     qa  (t a);
+      add "singleton" qa  (kv a --> t a);
+      add "lookup"    qa  (t_string --> (t a --> t_option a));
+      add "eql"       qa  ((a --> (a --> t_bool)) --> (t a --> (t a --> t_bool)));
+      add "insert"    qa  (kv a --> (t a --> t_option (t a)));
+      add "map"       qab ((t_string --> (a --> b)) --> (t a --> t b));
+      add "fold_left" qab ((a --> (kv b --> a)) --> (a --> t b --> a));
+      let t_dup_err = ty0 "dup_err" in
+      add_con "DupErr" [] (t_string :: []) t_dup_err;
+      add "disjoint_union" qa (t a --> (t a --> t_result (t a) (t_dup_err)));
+      ()
+    ));
     add_mod "Miniml" (mk_ctx (fun add _ _ _ _ ->
       add "log_level" [] t_int;
       add "debug" [] ((t_unit --> t_string) --> t_unit);
