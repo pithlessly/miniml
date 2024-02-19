@@ -160,6 +160,7 @@ let lex str =
   in
   go 0 []
 
+type mod_expr = | Module of string
 type ('var, 'con, 'ty) pat =
                                | POr      of ('var, 'con, 'ty) pat
                                            * ('var, 'con, 'ty) pat
@@ -171,6 +172,8 @@ type ('var, 'con, 'ty) pat =
                                | PIntLit  of int
                                | PStrLit  of string
                                | PVar     of 'var
+                               | POpenIn  of mod_expr
+                                           * ('var, 'con, 'ty) pat
                                | PAsc     of ('var, 'con, 'ty) pat * 'ty
                                | PWild
 type ('var, 'con, 'ty) binding = ('var, 'con, 'ty) pat      (* head pattern *)
@@ -207,7 +210,6 @@ and  ('var, 'con, 'ty) expr =
                                | Function   of ( ('var, 'con, 'ty) pat
                                                * ('var, 'con, 'ty) expr
                                                ) list
-and mod_expr =                 | Module of string
 
 let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
   (* TODO: the real value restriction is smarter *)
@@ -485,6 +487,10 @@ let parse: token list -> ast m_result =
     match input with
     | KTrue        :: input -> k input (Some (PCon ("true", None)))
     | KFalse       :: input -> k input (Some (PCon ("false", None)))
+    | IdentUpper (mod_name, _) :: Dot
+                   :: input -> (* See NOTE (OpenIn) *)
+                               force "expected pattern" pattern3 input (fun input sub_pat ->
+                               k input (Some (POpenIn (Module mod_name, sub_pat))))
     | TkCharLit c  :: input -> k input (Some (PCharLit c))
     | TkIntLit i   :: input -> k input (Some (PIntLit i))
     | TkStrLit s   :: input -> k input (Some (PStrLit s))
@@ -506,10 +512,12 @@ let parse: token list -> ast m_result =
                                | _ -> Error (E "expected ')'"))
     | _                     -> k input None
   and pattern2 : ast_pat option parser = fun input k ->
-    (* NOTE: we don't have the same guard as in expr2 because we aren't bothering
-       to handle the Module.(...) pattern syntax. *)
-    match input with
-    | IdentUpper (constructor, sp) :: input ->
+    match (input, (match input with
+                   | IdentUpper (_, _) :: Dot :: _ -> false
+                   | IdentUpper (_, _)        :: _ -> true
+                   |                             _ -> false))
+    with
+    | (IdentUpper (constructor, sp) :: input, true) ->
       (* TODO: use sp here *)
       pattern3 input (fun input constructor_args_opt -> k input (
         (* See NOTE "constructor parsing hack" *)
@@ -729,7 +737,7 @@ let parse: token list -> ast m_result =
     | KFalse :: input -> k input (Some (Con ("false", None)))
     | IdentUpper (mod_name, _) :: Dot :: input ->
       (* TODO: care about spans *)
-      (* NOTE: what we are dong here is desugaring
+      (* NOTE (OpenIn): What we are dong here is desugaring
              Module.e = Module.(e) = let open Module in e
          This handles simple cases like `String.foo`, but incorrectly
          looks up non-existent identifiers in the enclosing scope, so:
@@ -1499,6 +1507,7 @@ let elab (ast : ast) : core m_result =
       | PCharLit _ | PIntLit _ | PStrLit _
       | PWild        -> Ok map_empty
       | PVar (v, _)  -> Ok (map_singleton (v, ()))
+      | POpenIn (_, p)
       | PAsc (p, _)  -> go p
     and go_list pats =
       List.fold_left merge (Ok map_empty) (List.map go pats)
@@ -1518,21 +1527,21 @@ let elab (ast : ast) : core m_result =
   (* TODO: exhaustiveness checking? *)
   and infer_pat_with_vars lvl tvs ctx (bindings : core_var string_map) :
                           ast_pat -> (core_pat * core_type) m_result =
-    let rec go =
+    let rec go ctx =
       function
-      | POr (p1, p2) -> let* (p1', ty1) = go p1 in
-                        let* (p2', ty2) = go p2 in
+      | POr (p1, p2) -> let* (p1', ty1) = go ctx p1 in
+                        let* (p2', ty2) = go ctx p2 in
                         let* () = unify ty1 ty2 in
                         Ok (POr (p1', p2'), ty1)
       | PTuple ps ->
-        let* ps' = map_m error_monad go ps in
+        let* ps' = map_m error_monad (go ctx) ps in
         Ok (PTuple (List.map fst ps'),
             t_tuple (List.map snd ps'))
       | PList ps ->
         let ty_elem = new_uvar lvl None () in
         let* ps' = map_m error_monad
                           (fun p ->
-                            let* (p', ty_p) = go p in
+                            let* (p', ty_p) = go ctx p in
                             let* () = unify ty_p ty_elem in
                             Ok p'
                           ) ps
@@ -1542,7 +1551,7 @@ let elab (ast : ast) : core m_result =
           preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
                                       ctx name args
         in
-        let* args' = map_m error_monad go args in
+        let* args' = map_m error_monad (go ctx) args in
         let* () = unify_all param_tys (List.map snd args') in
         let args' = List.map fst args' in
         Ok (PCon (cv, Some args'), ground result_ty)
@@ -1554,12 +1563,16 @@ let elab (ast : ast) : core m_result =
                                                ^ " " ^ describe_span sp))
                          | Some v -> let (Binding (_, _, _, _, ty)) = v in
                                      Ok (PVar v, ty))
-      | PAsc (p, ty) -> let* (p', ty1) = go p in
+      | POpenIn (Module name, p)
+                     -> (match extend_open ctx name with
+                         | Some ctx -> go ctx p
+                         | None     -> Error (E ("module not in scope: " ^ name)))
+      | PAsc (p, ty) -> let* (p', ty1) = go ctx p in
                         let* ty' = translate_ast_typ ctx tvs ty in
                         let* () = unify ty1 ty' in
                         Ok (p', ty')
       | PWild        -> Ok (PWild, new_uvar lvl None ())
-    in go
+    in go ctx
   in
   let infer_pat lvl tvs : ctx -> ast_pat -> (ctx * (core_pat * core_type)) m_result =
     fun ctx pat ->
@@ -1872,6 +1885,8 @@ let compile (target : compile_target) (decls : core) : string =
       | PCharLit _ | PIntLit _ | PStrLit _
       | PWild        -> []
       | PVar v       -> v :: []
+      | POpenIn (_, _)
+                     -> invalid_arg "POpenIn should no longer be present in core_pat"
       | PAsc (_, vd) -> Void.absurd vd
     in
     let rec go_pat : core_pat -> string =
@@ -1924,6 +1939,7 @@ let compile (target : compile_target) (decls : core) : string =
       | PIntLit i -> "(= scrutinee " ^ go_int i ^ ")"
       | PStrLit s -> "(string=? scrutinee " ^ go_str s ^ ")"
       | PVar v -> "(begin (set! " ^ go_var v ^ " scrutinee) #t)"
+      | POpenIn (_, _) -> invalid_arg "POpenIn should no longer be present in core_pat"
       | PAsc (_, vd) -> Void.absurd vd
       | PWild -> "#t"
     in
