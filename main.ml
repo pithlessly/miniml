@@ -235,7 +235,7 @@ let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
   in go
 
 type ast_typ = | TVar of string * span
-               | TCon of string * span * ast_typ list
+               | TCon of mod_expr list * string * span * ast_typ list
 type ast_pat      = (string * span, string, ast_typ) pat
 type ast_binding  = (string * span, string, ast_typ) binding
 type ast_bindings = (string * span, string, ast_typ) bindings
@@ -362,10 +362,16 @@ let parse: token list -> ast m_result =
                                     | _ -> Error (E "expected type name")
   in
   let rec ty_atomic: ast_typ parser =
-    let ty_base input k =
+    let rec ty_base input k =
       match input with
       | IdentQuote (v, sp) :: input -> k input (TVar (v, sp) :: [])
-      | IdentLower (v, sp) :: input -> k input (TCon (v, sp, []) :: [])
+      | IdentLower (v, sp) :: input -> k input (TCon ([], v, sp, []) :: [])
+      | IdentUpper (name, _) :: Dot :: input ->
+        ty_base input (fun input ts ->
+        match ts with
+        | TCon (modules, v, sp, params) :: [] ->
+            k input (TCon (Module name :: modules, v, sp, params) :: [])
+        | _  -> Error (E "only do 'Module.tycon' please"))
       | OpenParen :: input ->
         let rec go input ts =
           match input with
@@ -380,12 +386,20 @@ let parse: token list -> ast m_result =
     fun input k ->
     (* parse out all suffixed type constructors *)
     let rec go input params =
-      match input with
-      | IdentLower (v, sp) :: input -> go input (TCon (v, sp, params) :: [])
-      | _ -> match params with
-             | [] -> invalid_arg "should be impossible"
-             | t :: [] -> k input t
-             | _ -> Error (E "you may have been trying to use Haskell tuple syntax")
+      let rec tycon (modules : mod_expr list) : (mod_expr list * string * span) option parser = fun input k ->
+        match input with
+        | IdentUpper (name, _) :: Dot :: input -> tycon (Module name :: modules) input k
+        | IdentLower (v, sp)          :: input -> k input (Some (List.rev modules, v, sp))
+        | _                                    -> k input None
+      in
+      tycon [] input (fun input tycon_info_opt ->
+      match tycon_info_opt with
+      | Some (modules, v, sp) -> let params' = TCon (modules, v, sp, params) :: [] in
+                                 go input params'
+      | None -> match params with
+                | [] -> invalid_arg "should be impossible"
+                | t :: [] -> k input t
+                | _ -> Error (E "you may have been trying to use Haskell tuple syntax"))
     in ty_base input go
   and ty: ast_typ parser =
     fun input k ->
@@ -407,8 +421,8 @@ let parse: token list -> ast m_result =
             (List.rev ty_operands)
             (List.rev ty_operators)
             (function
-             | "->" -> (0, AssocRight (fun l r -> TCon ("->", dummy_span, l :: r :: [])))
-             | "*"  -> (1, AssocNone (fun ts -> TCon ("*", dummy_span, ts)))
+             | "->" -> (0, AssocRight (fun l r -> TCon ([], "->", dummy_span, l :: r :: [])))
+             | "*"  -> (1, AssocNone (fun ts -> TCon ([], "*", dummy_span, ts)))
              | _    -> invalid_arg "should be impossible")
         in k input ty_expr)
     in go input [] []
@@ -1346,14 +1360,18 @@ let elab (ast : ast) : core m_result =
         let* args' = map_m error_monad (subst rho) args in
         Ok (CTCon (c, args'))
     in
-    let rec go =
+    let rec go ctx =
       function
       | TVar (s, sp) ->
         (match tvs_lookup tvs s with
         | None -> Error (E ("(impossible?) binding not found for tvar: " ^ s
                             ^ " " ^ describe_span sp))
         | Some ty -> Ok ty)
-      | TCon (name, sp, args) ->
+      | TCon (Module mod_name :: ms, name, sp, args) ->
+        (match extend_open ctx mod_name with
+         | None     -> Error (E ("module not in scope: " ^ mod_name))
+         | Some ctx -> go ctx (TCon (ms, name, sp, args)))
+      | TCon ([], name, sp, args) ->
         match lookup_ty name ctx with
         | None -> Error (E ("type constructor not in scope: " ^ name))
         | Some decl ->
@@ -1362,12 +1380,12 @@ let elab (ast : ast) : core m_result =
             Error (E ("type constructor " ^ name ^ " " ^ describe_span sp
                       ^ " expects " ^ string_of_int arity ^ " argument(s)"))
           else
-            let* args' = map_m error_monad go args in
+            let* args' = map_m error_monad (go ctx) args in
             match decl with
             | CDatatype (_, _) -> Ok (CTCon (con, args'))
             | CAlias (_, _, params, definition) ->
               subst (List.map2 (fun p a -> (p, a)) params args') definition
-    in go
+    in go ctx
   in
   let translate_ast_typ_decl : (string list * string * ast_typ_decl) list ->
                                ctx -> ctx m_result =
