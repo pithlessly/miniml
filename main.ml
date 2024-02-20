@@ -1253,7 +1253,7 @@ let initial_ctx
       let ty0 name = CTCon (add_ty name 0, [])
       and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
       in
-      let t = ty1 "string_map" in
+      let t = ty1 "t" in
       let kv a = CTCon (t_tuple, t_string :: a :: []) in
       add "empty"     qa  (t a);
       add "singleton" qa  (kv a --> t a);
