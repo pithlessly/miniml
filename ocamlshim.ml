@@ -34,7 +34,7 @@ module StringMap : sig
   val eql       : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
   val insert    : string * 'a -> 'a t -> 'a t option
   val map       : (string -> 'a -> 'b) -> 'a t -> 'b t
-  val fold_left : ('a -> string * 'b -> 'a) -> ('a -> 'b t -> 'a)
+  val fold      : ('a -> string * 'b -> 'a) -> ('a -> 'b t -> 'a)
 
   type dup_err = DupErr of string
   val disjoint_union : 'a t -> 'a t -> ('a t, dup_err) result
@@ -50,7 +50,7 @@ end = struct
     | None   -> Some (n + 1, Map.add k v entries)
     | Some v -> None
   let map f (n, entries) = (n, Map.mapi f entries)
-  let fold_left f x (_, entries) = Map.fold (fun k v acc -> f acc (k, v)) entries x
+  let fold f x (_, entries) = Map.fold (fun k v acc -> f acc (k, v)) entries x
   type dup_err = DupErr of string
   exception DupExn of dup_err
   let disjoint_union (n1, entries1) (n2, entries2) =

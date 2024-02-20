@@ -381,8 +381,8 @@
                                        " => "
                                        (with-output-to-string (lambda () (write new-map)))))
   (if (null? new-map) '() (list new-map)))))
-(define miniml-StringMap.map       hashtrie-map)
-(define miniml-StringMap.fold_left hashtrie-fold)
+(define miniml-StringMap.map  hashtrie-map)
+(define miniml-StringMap.fold hashtrie-fold)
 (define miniml-StringMap.disjoint_union (lambda (m1) (lambda (m2)
   (call/cc (lambda (k)
     (vector 'Ok (hashtrie-disjoint-union
