@@ -1890,7 +1890,9 @@ let compile (target : compile_target) (decls : core) : string =
         | _    -> "miniml-" ^ prefix ^ name
     and go_cvar (CBinding (name, id, prov, _, _, _)) =
       match (prov, name) with
-      | (Builtin "", ("Error" | "Ok"))
+      (* TODO: avoid special casing these constructors *)
+      | (Builtin "StringMap.", "DupErr")
+      | (Builtin "", ("Error" | "Ok")) -> "'" ^ name
       | (User, _) -> "'" ^ name ^ string_of_int id
       | _ -> invalid_arg "builtin constructors are handled specially"
     in
@@ -1950,7 +1952,8 @@ let compile (target : compile_target) (decls : core) : string =
           | ("Some", p :: []) -> "(and (pair? scrutinee)" ^
                                      " (let ((scrutinee (car scrutinee))) " ^
                                          go_pat p ^ "))"
-          | (("Ok" | "Error"), _) -> vector_layout ()
+          (* TODO: DupErr could use newtype layout *)
+          | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
           | (_, ps) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
                              ^ string_of_int (List.length ps)))
       | PCharLit c -> "(char=? scrutinee " ^ go_char c ^ ")"
@@ -1987,7 +1990,8 @@ let compile (target : compile_target) (decls : core) : string =
           | ("false", []) -> "#f"
           | ("None",      []) -> "'()"
           | ("Some", e :: []) -> "(list " ^ go_expr e ^ ")"
-          | (("Ok" | "Error"), _) -> vector_layout ()
+          (* TODO: DupErr could use newtype layout *)
+          | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
           | (_, es) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
                              ^ string_of_int (List.length es)))
       | CharLit c -> go_char c
