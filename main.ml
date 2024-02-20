@@ -1261,7 +1261,7 @@ let initial_ctx
       add "eql"       qa  ((a --> (a --> t_bool)) --> (t a --> (t a --> t_bool)));
       add "insert"    qa  (kv a --> (t a --> t_option (t a)));
       add "map"       qab ((t_string --> (a --> b)) --> (t a --> t b));
-      add "fold_left" qab ((a --> (kv b --> a)) --> (a --> t b --> a));
+      add "fold_left" qab ((a --> (kv b --> a)) --> (a --> (t b --> a)));
       let t_dup_err = ty0 "dup_err" in
       add_con "DupErr" [] (t_string :: []) t_dup_err;
       add "disjoint_union" qa (t a --> (t a --> t_result (t a) (t_dup_err)));
