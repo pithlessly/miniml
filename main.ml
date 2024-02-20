@@ -930,77 +930,18 @@ let show_ty : core_type -> string =
                             (") " :: con :: acc))
   in fun ty -> String.concat "" (go 0 ty [])
 
-type 'a string_map = int * (string * 'a) list
-(* TODO: replace with a more efficient implementation *)
-let map_empty : 'a string_map = (0, [])
-let map_singleton : (string * 'a) -> 'a string_map =
-  fun entry -> (1, entry :: [])
-let map_lookup k : 'a string_map -> 'a option =
-  fun (_, map) -> Option.map snd (List.find_opt (fun (k', _) -> k = k') map)
-let map_eql (elem_eql : 'a -> 'a -> bool) : 'a string_map -> 'a string_map -> bool =
-  fun (n1, m1) (n2, m2) ->
-    if n1 <> n2 then false else
-    let rec go m1 m2 =
-      match (m1, m2) with
-      | ([], []) -> true
-      | ([], _) -> invalid_arg "impossible - maps have different sizes"
-      | ((k, v) :: m1, m2) ->
-        let rec remove_key acc m2 =
-          match m2 with
-          | []             -> false (* k not present in m2 *)
-          | (k', v') :: m2 ->
-            if k <> k' then
-              remove_key ((k', v') :: acc) m2
-            else
-              if not (elem_eql v v') then false else
-              let m2 = List.fold_left (fun m2 pair -> pair :: m2) m2 acc in
-              go m1 m2
-        in remove_key [] m2
-    in go m1 m2
-let map_insert (k, v) : 'a string_map -> 'a string_map option =
-  fun (n, m) -> match List.find_opt (fun (k', _) -> k = k') m with
-                | None   -> Some (n + 1, (k, v) :: m)
-                | Some _ -> None
-type dup_err = | DupErr of string
-let map_disjoint_union
-  : 'a string_map -> 'a string_map -> ('a string_map, dup_err) result
-  = fun map1 map2 ->
-    (* sort by size *)
-    let (map1, map2) =
-      let (n1, _) = map1 in
-      let (n2, _) = map2 in
-      if n1 < n2 then (map1, map2) else (map2, map1)
-    in
-    let ((n1, m1), (n2, m2)) = (map1, map2) in
-    let rec go m1 acc =
-      match m1 with
-      | [] -> Ok (n1 + n2, acc)
-      | (k, v) :: m1 ->
-        match map_lookup k map2 with
-        | Some _ -> Error (DupErr k)
-        | None   -> go m1 ((k, v) :: acc)
-    in go m1 m2
-let map_map (f : string -> 'a -> 'b) : 'a string_map -> 'b string_map =
-  fun (n, m) -> (n, List.map (fun (k, v) -> (k, f k v)) m)
-(* hopefully the order is irrelevant *)
-let map_fold_left (f : 'a -> (string * 'b) -> 'a) : 'a -> 'b string_map -> 'a =
-  let rec go acc m = (match m with
-                      | [] -> acc
-                      | kv :: m -> go (f acc kv) m)
-  in fun init (_, m) -> go init m
-
 type tvs = | TyvarScope of (string -> core_type option)
 let tvs_lookup (TyvarScope f) s = f s
-let tvs_from_map (m : core_type string_map) =
-  TyvarScope (fun s -> map_lookup s m)
+let tvs_from_map (m : core_type StringMap.t) =
+  TyvarScope (fun s -> StringMap.lookup s m)
 let tvs_new_dynamic (new_ty : string -> core_type) () =
-  let cache = ref map_empty in
+  let cache = ref StringMap.empty in
   TyvarScope (fun s ->
-    match map_lookup s (deref cache) with
+    match StringMap.lookup s (deref cache) with
     | Some ty -> Some ty
     | None ->
       let ty = new_ty s in
-      cache := Option.unwrap (map_insert (s, ty) (deref cache));
+      cache := Option.unwrap (StringMap.insert (s, ty) (deref cache));
       Some ty)
 
 let rec occurs_check (v : core_uvar ref) : core_type -> unit m_result =
@@ -1403,13 +1344,13 @@ let elab (ast : ast) : core m_result =
                                    (ty_params, name, decl) ->
         let arity = List.length ty_params in
         let ty_params_qvs = List.map (fun s -> (s, QVar (s, next_var_id ()))) ty_params in
-        let* (ty_params_map : core_type string_map) =
+        let* (ty_params_map : core_type StringMap.t) =
           fold_left_m error_monad (fun acc (s, qv) ->
-            match map_insert (s, CQVar qv) acc with
+            match StringMap.insert (s, CQVar qv) acc with
             | Some map -> Ok map
             | None -> Error (E ("type declaration " ^ name ^
                                 " has duplicate type parameter '" ^ s))
-          ) map_empty ty_params_qvs
+          ) StringMap.empty ty_params_qvs
         in
         let tvs = tvs_from_map ty_params_map in
         let ty_params = List.map snd ty_params_qvs in
@@ -1511,39 +1452,39 @@ let elab (ast : ast) : core m_result =
      - create a new Var (with ids and new uvars for types) for each bound variable;
      - traverse the pattern again, translating each identifier to its corresponding Var.
      *)
-  let pat_bound_vars : core_level -> ast_pat -> core_var string_map m_result =
+  let pat_bound_vars : core_level -> ast_pat -> core_var StringMap.t m_result =
     let rec go =
       function
       | POr (p1, p2) -> let* v1 = go p1 in
                         let* v2 = go p2 in
-                        if map_eql (fun () () -> true) v1 v2 then Ok v1
+                        if StringMap.eql (fun () () -> true) v1 v2 then Ok v1
                         else Error (E "branches do not bind the same variables")
       | PTuple ps    -> go_list ps
       | PList ps     -> go_list ps
       | PCon (_, ps) -> (match ps with | Some ps -> go_list ps
-                                       | None    -> Ok map_empty)
+                                       | None    -> Ok StringMap.empty)
       | PCharLit _ | PIntLit _ | PStrLit _
-      | PWild        -> Ok map_empty
-      | PVar (v, _)  -> Ok (map_singleton (v, ()))
+      | PWild        -> Ok StringMap.empty
+      | PVar (v, _)  -> Ok (StringMap.singleton (v, ()))
       | POpenIn (_, p)
       | PAsc (p, _)  -> go p
     and go_list pats =
-      List.fold_left merge (Ok map_empty) (List.map go pats)
+      List.fold_left merge (Ok StringMap.empty) (List.map go pats)
     and merge ev1 ev2 =
       let* v1 = ev1 in
       let* v2 = ev2 in
-      match map_disjoint_union v1 v2 with
+      match StringMap.disjoint_union v1 v2 with
       | Ok v' -> Ok v'
-      | Error (DupErr v) -> Error (E "variable bound multiple times in the same pattern: v")
+      | Error (StringMap.(DupErr v)) -> Error (E "variable bound multiple times in the same pattern: v")
     in
     fun lvl pat ->
       let* bindings = go pat in
-      Ok (map_map
+      Ok (StringMap.map
         (fun s () ->
           Binding (s, next_var_id (), User, [], new_uvar lvl (Some s) ())
         ) bindings)
   (* TODO: exhaustiveness checking? *)
-  and infer_pat_with_vars lvl tvs ctx (bindings : core_var string_map) :
+  and infer_pat_with_vars lvl tvs ctx (bindings : core_var StringMap.t) :
                           ast_pat -> (core_pat * core_type) m_result =
     let rec go ctx =
       function
@@ -1576,7 +1517,7 @@ let elab (ast : ast) : core m_result =
       | PCharLit c   -> Ok (PCharLit c, t_char)
       | PIntLit c    -> Ok (PIntLit c, t_int)
       | PStrLit c    -> Ok (PStrLit c, t_string)
-      | PVar (s, sp) -> (match map_lookup s bindings with
+      | PVar (s, sp) -> (match StringMap.lookup s bindings with
                          | None   -> Error (E ("unexpected variable in pattern: " ^ s
                                                ^ " " ^ describe_span sp))
                          | Some v -> let (Binding (_, _, _, _, ty)) = v in
@@ -1596,7 +1537,7 @@ let elab (ast : ast) : core m_result =
     fun ctx pat ->
     let* bindings = pat_bound_vars lvl pat in
     let* pat' = infer_pat_with_vars lvl tvs ctx bindings pat in
-    let ctx' = map_fold_left (fun ctx (_, v) -> extend ctx v) ctx bindings in
+    let ctx' = StringMap.fold_left (fun ctx (_, v) -> extend ctx v) ctx bindings in
     Ok (ctx', pat')
   in
   let infer_pats lvl tvs : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list) m_result =
@@ -1718,15 +1659,15 @@ let elab (ast : ast) : core m_result =
     (* combine all the bindings *)
     let* vars =
       let sets = List.map fst bindings in
-      match fold_left_m error_monad map_disjoint_union map_empty sets with
+      match fold_left_m error_monad StringMap.disjoint_union StringMap.empty sets with
       | Ok combined      -> Ok combined
-      | Error (DupErr v) ->
+      | Error (StringMap.(DupErr v)) ->
         Error (E ("variable bound multiple times in a group of definitions: " ^ v))
     in
     (* the context used for the bindings contains these variables iff the binding group
        is recursive *)
     let ctx_inner = if is_rec
-                    then map_fold_left (fun ctx (_, v) -> extend ctx v) ctx vars
+                    then StringMap.fold_left (fun ctx (_, v) -> extend ctx v) ctx vars
                     else ctx
     in
     (* infer each binding *)
@@ -1766,7 +1707,7 @@ let elab (ast : ast) : core m_result =
       (* flatten the maps in `bindings`; order is irrelevant, and we
          already know them to be disjoint *)
       List.fold_left (fun acc (bv, _, _) ->
-        map_fold_left (fun acc (_, v) -> v :: acc) acc bv
+        StringMap.fold_left (fun acc (_, v) -> v :: acc) acc bv
       ) [] bindings
     in
     (* conservatively assume that we can only generalize the whole group
