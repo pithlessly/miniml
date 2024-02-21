@@ -941,7 +941,7 @@ let tvs_new_dynamic (new_ty : string -> core_type) () =
     | Some ty -> Some ty
     | None ->
       let ty = new_ty s in
-      cache := Option.unwrap (StringMap.insert (s, ty) (deref cache));
+      cache := Option.unwrap (StringMap.insert s ty (deref cache));
       Some ty)
 
 let rec occurs_check (v : core_uvar ref) : core_type -> unit m_result =
@@ -1200,7 +1200,7 @@ let initial_ctx
       add "singleton" qa  (t_string --> (a --> t a));
       add "lookup"    qa  (t_string --> (t a --> t_option a));
       add "eql"       qa  ((a --> (a --> t_bool)) --> (t a --> (t a --> t_bool)));
-      add "insert"    qa  (kv a --> (t a --> t_option (t a)));
+      add "insert"    qa  (t_string --> (a --> (t a --> t_option (t a))));
       add "map"       qab ((t_string --> (a --> b)) --> (t a --> t b));
       add "fold"      qab ((a --> (kv b --> a)) --> (a --> (t b --> a)));
       let t_dup_err = ty0 "dup_err" in
@@ -1346,7 +1346,7 @@ let elab (ast : ast) : core m_result =
         let ty_params_qvs = List.map (fun s -> (s, QVar (s, next_var_id ()))) ty_params in
         let* (ty_params_map : core_type StringMap.t) =
           fold_left_m error_monad (fun acc (s, qv) ->
-            match StringMap.insert (s, CQVar qv) acc with
+            match StringMap.insert s (CQVar qv) acc with
             | Some map -> Ok map
             | None -> Error (E ("type declaration " ^ name ^
                                 " has duplicate type parameter '" ^ s))

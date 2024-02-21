@@ -365,9 +365,7 @@
                                        (with-output-to-string (lambda () (write entry)))))
   (if (null? entry) '() (list (ht-value entry))))))
 (define miniml-StringMap.eql (hashtrie-eql? string=?))
-(define miniml-StringMap.insert (lambda (kv) (lambda (m)
-  (define k (miniml-fst kv))
-  (define v (miniml-snd kv))
+(define miniml-StringMap.insert (lambda (k) (lambda (v) (lambda (m)
   (define new-map (hashtrie-insert string=? (string-hash k) k v m))
   #;
   (miniml-prerr_endline (string-append "*** miniml-StringMap.insert: k="
@@ -378,7 +376,7 @@
                                        (with-output-to-string (lambda () (write m)))
                                        " => "
                                        (with-output-to-string (lambda () (write new-map)))))
-  (if (null? new-map) '() (list new-map)))))
+  (if (null? new-map) '() (list new-map))))))
 (define miniml-StringMap.map  hashtrie-map)
 (define miniml-StringMap.fold hashtrie-fold)
 (define miniml-StringMap.disjoint_union (lambda (m1) (lambda (m2)

@@ -32,7 +32,7 @@ module StringMap : sig
   val singleton : string -> 'a -> 'a t
   val lookup    : string -> 'a t -> 'a option
   val eql       : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
-  val insert    : string * 'a -> 'a t -> 'a t option
+  val insert    : string -> 'a -> 'a t -> 'a t option
   val map       : (string -> 'a -> 'b) -> 'a t -> 'b t
   val fold      : ('a -> string * 'b -> 'a) -> ('a -> 'b t -> 'a)
 
@@ -45,7 +45,7 @@ end = struct
   let singleton k v = (1, Map.singleton k v)
   let lookup k (_, entries) = Map.find_opt k entries
   let eql elem_eql (n1, entries1) (n2, entries2) = (n1 = n2) && Map.equal elem_eql entries1 entries2
-  let insert (k, v) (n, entries) =
+  let insert k v (n, entries) =
     match Map.find_opt k entries with
     | None   -> Some (n + 1, Map.add k v entries)
     | Some v -> None
