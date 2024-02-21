@@ -357,9 +357,7 @@
       hash)))
 
 (define miniml-StringMap.empty hashtrie-empty)
-(define (miniml-StringMap.singleton kv) (hashtrie-singleton (string-hash (miniml-fst kv))
-                                                            (miniml-fst kv)
-                                                            (miniml-snd kv)))
+(define miniml-StringMap.singleton (lambda (k) (lambda (v) (hashtrie-singleton (string-hash k) k v))))
 (define miniml-StringMap.lookup (lambda (k) (lambda (m)
   (define entry (hashtrie-lookup string=? (string-hash k) k m))
   #;

@@ -29,7 +29,7 @@ end
 module StringMap : sig
   type 'a t
   val empty     : 'a t
-  val singleton : string * 'a -> 'a t
+  val singleton : string -> 'a -> 'a t
   val lookup    : string -> 'a t -> 'a option
   val eql       : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
   val insert    : string * 'a -> 'a t -> 'a t option
@@ -42,7 +42,7 @@ end = struct
   module Map = Map.Make(String)
   type 'a t = int * 'a Map.t
   let empty = (0, Map.empty)
-  let singleton (k, v) = (1, Map.singleton k v)
+  let singleton k v = (1, Map.singleton k v)
   let lookup k (_, entries) = Map.find_opt k entries
   let eql elem_eql (n1, entries1) (n2, entries2) = (n1 = n2) && Map.equal elem_eql entries1 entries2
   let insert (k, v) (n, entries) =

@@ -1197,7 +1197,7 @@ let initial_ctx
       let t = ty1 "t" in
       let kv a = CTCon (t_tuple, t_string :: a :: []) in
       add "empty"     qa  (t a);
-      add "singleton" qa  (kv a --> t a);
+      add "singleton" qa  (t_string --> (a --> t a));
       add "lookup"    qa  (t_string --> (t a --> t_option a));
       add "eql"       qa  ((a --> (a --> t_bool)) --> (t a --> (t a --> t_bool)));
       add "insert"    qa  (kv a --> (t a --> t_option (t a)));
@@ -1465,7 +1465,7 @@ let elab (ast : ast) : core m_result =
                                        | None    -> Ok StringMap.empty)
       | PCharLit _ | PIntLit _ | PStrLit _
       | PWild        -> Ok StringMap.empty
-      | PVar (v, _)  -> Ok (StringMap.singleton (v, ()))
+      | PVar (v, _)  -> Ok (StringMap.singleton v ())
       | POpenIn (_, p)
       | PAsc (p, _)  -> go p
     and go_list pats =
