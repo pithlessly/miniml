@@ -1195,14 +1195,13 @@ let initial_ctx
       and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
       in
       let t = ty1 "t" in
-      let kv a = CTCon (t_tuple, t_string :: a :: []) in
       add "empty"     qa  (t a);
       add "singleton" qa  (t_string --> (a --> t a));
       add "lookup"    qa  (t_string --> (t a --> t_option a));
       add "eql"       qa  ((a --> (a --> t_bool)) --> (t a --> (t a --> t_bool)));
       add "insert"    qa  (t_string --> (a --> (t a --> t_option (t a))));
       add "map"       qab ((t_string --> (a --> b)) --> (t a --> t b));
-      add "fold"      qab ((a --> (kv b --> a)) --> (a --> (t b --> a)));
+      add "fold"      qab ((a --> (t_string --> (b --> a))) --> (a --> (t b --> a)));
       let t_dup_err = ty0 "dup_err" in
       add_con "DupErr" [] (t_string :: []) t_dup_err;
       add "disjoint_union" qa (t a --> (t a --> t_result (t a) (t_dup_err)));
@@ -1537,7 +1536,7 @@ let elab (ast : ast) : core m_result =
     fun ctx pat ->
     let* bindings = pat_bound_vars lvl pat in
     let* pat' = infer_pat_with_vars lvl tvs ctx bindings pat in
-    let ctx' = StringMap.fold (fun ctx (_, v) -> extend ctx v) ctx bindings in
+    let ctx' = StringMap.fold (fun ctx _ v -> extend ctx v) ctx bindings in
     Ok (ctx', pat')
   in
   let infer_pats lvl tvs : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list) m_result =
@@ -1667,7 +1666,7 @@ let elab (ast : ast) : core m_result =
     (* the context used for the bindings contains these variables iff the binding group
        is recursive *)
     let ctx_inner = if is_rec
-                    then StringMap.fold (fun ctx (_, v) -> extend ctx v) ctx vars
+                    then StringMap.fold (fun ctx _ v -> extend ctx v) ctx vars
                     else ctx
     in
     (* infer each binding *)
@@ -1707,7 +1706,7 @@ let elab (ast : ast) : core m_result =
       (* flatten the maps in `bindings`; order is irrelevant, and we
          already know them to be disjoint *)
       List.fold_left (fun acc (bv, _, _) ->
-        StringMap.fold (fun acc (_, v) -> v :: acc) acc bv
+        StringMap.fold (fun acc _ v -> v :: acc) acc bv
       ) [] bindings
     in
     (* conservatively assume that we can only generalize the whole group

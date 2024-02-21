@@ -302,7 +302,7 @@
   (let loop ((branch (cdr m))
              (acc x))
     (cond ((null?   branch) acc)
-          ((vector? branch) ((f acc) (vector (ht-key branch) (ht-value branch))))
+          ((vector? branch) (((f acc) (ht-key branch)) (ht-value branch)))
           ((pair?   branch) (loop (cdr branch) (loop (car branch) acc)))))))))
 
 (define (all-pairs p l1 l2)
