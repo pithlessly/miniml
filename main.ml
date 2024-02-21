@@ -502,7 +502,7 @@ let parse: token list -> ast m_result =
     | KTrue        :: input -> k input (Some (PCon ("true", None)))
     | KFalse       :: input -> k input (Some (PCon ("false", None)))
     | IdentUpper (mod_name, _) :: Dot
-                   :: input -> (* See NOTE (OpenIn) *)
+                   :: input -> (* See NOTE "OpenIn" *)
                                force "expected pattern" pattern3 input (fun input sub_pat ->
                                k input (Some (POpenIn (Module mod_name, sub_pat))))
     | TkCharLit c  :: input -> k input (Some (PCharLit c))
@@ -751,7 +751,7 @@ let parse: token list -> ast m_result =
     | KFalse :: input -> k input (Some (Con ("false", None)))
     | IdentUpper (mod_name, _) :: Dot :: input ->
       (* TODO: care about spans *)
-      (* NOTE (OpenIn): What we are dong here is desugaring
+      (* NOTE "OpenIn": What we are dong here is desugaring
              Module.e = Module.(e) = let open Module in e
          This handles simple cases like `String.foo`, but incorrectly
          looks up non-existent identifiers in the enclosing scope, so:
