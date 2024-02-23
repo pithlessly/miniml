@@ -338,7 +338,7 @@
                  (ht-hash b2))
               (key-eql?
                 (ht-key b1)
-                (ht-key b2)))   (duplicate-key (ht-key b1)))
+                (ht-key b2)))    (duplicate-key (ht-key b1)))
         (#t                      (loop-pair (develop b1) (develop b2)))))))
 
 ; ====================================================
