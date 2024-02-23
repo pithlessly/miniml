@@ -46,8 +46,8 @@ let lex str =
                           | _ -> false
   in
   (* main logic *)
-  let latest_line = ref 1 in
-  let latest_idx = ref (0 - 1) in
+  let latest_line = ref 1
+  and latest_idx = ref (0 - 1) in
   let char =
     let length = String.length str in
     fun i ->
