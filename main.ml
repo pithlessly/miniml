@@ -1773,6 +1773,238 @@ let elab (ast : ast) : core m_result =
         ) ast initial_ctx
   in Ok (List.concat ast')
 
+type pg_refcnt  = int ref (* data references *)
+                * int ref (* ctrl references *)
+                          (* reference counts track the number of times a value appears
+                             as a dependency of another "alive" value or block; a value
+                             does not need to have its reference count decremented when
+                             it stops being alive, but its dependents do *)
+
+type pg_vid     = int (* unique ID per value *)
+type pg_bid     = int (* unique ID per block *)
+type pg_paramid = int (* unique ID per lambda parameter *)
+type pg_inline  = bool
+type pg_vname   = string
+type pg_block = | GBlock of pg_bid * pg_time * pg_value
+and  pg_value = | GValue of pg_vid * pg_vname * pg_bid * pg_refcnt * pg_vkind
+and  pg_time  = pg_value
+and  pg_vkind = | VkStart
+                | VkVector  of pg_value list
+                | VkCharLit of char
+                | VkIntLit  of int
+                | VkStrLit  of string
+                | VkTrue
+                | VkFalse
+                | VkParam   of pg_paramid
+                | VkApp     of pg_time * pg_value * pg_value list
+                | VkCond    of ( pg_value (* condition *)
+                               * pg_block (* case *)
+                               ) list
+                             * pg_block (* fallback *)
+                | VkLambda  of pg_paramid list * pg_inline * pg_block
+                | VkPrim    of string * pg_value list
+                | VkPrimC   of string * pg_time * pg_value list
+
+(* NOTE "managing value reference counts":
+   in a complete program graph, we uphold the invariant that a node's reference
+   counts are are exactly its number of incoming data and control edges. Note
+   that this isn't the same as the number of *references*, since we can refer
+   to a node without creating a new edge. Edges come from two places:
+
+   - Another (live) value which points to a node is considered to have an edge to it;
+   - A block is considered to have a control and data edge to its respective exit points.
+
+   A newly created node is considered to have a single data reference, even though
+   this node may not yet be truly "mounted" in the graph.
+
+   There are also other situations during graph creation where we artificially increase
+   the reference count to prevent a value from being destroyed when there is still a
+   *possibility* of new edges to it being created (e.g. because the node is bound to a
+   variable).
+ *)
+
+(* destructor functions for values & blocks that correctly manage reference counts *)
+
+let rec destroy_vkind = function
+  | VkStart | VkCharLit _ | VkIntLit _ | VkStrLit _ | VkTrue | VkFalse | VkParam _ -> ()
+  | VkVector vs
+  | VkPrim (_, vs)       -> List.iter dec_drefc vs
+  | VkPrimC (_, t, vs)   -> List.iter dec_drefc vs; dec_crefc t
+  | VkApp (t, vf, vxs)   -> dec_crefc t; dec_drefc vf; List.iter dec_drefc vxs
+  | VkCond (cases, blk)  -> List.iter (fun (condition, blk) -> dec_drefc condition;
+                                                               destroy_block blk) cases;
+                            destroy_block blk
+  | VkLambda (_, _, blk) -> destroy_block blk
+and dec_drefc (GValue (_, _, _, (drc, crc), knd)) = maybe_destroy_value drc crc knd
+and dec_crefc (GValue (_, _, _, (drc, crc), knd)) = maybe_destroy_value crc drc knd
+and maybe_destroy_value rc1 rc2 knd =
+  let rcv1 = deref rc1 - 1
+  and rcv2 = deref rc2 in
+  (if rcv1 < 0
+    then invalid_arg "impossible: decremened a reference count too far"
+    else rc1 := rcv1);
+  if rcv1 > 0 || rcv2 > 0 then () else destroy_vkind knd
+and destroy_block (GBlock (_, t, v)) = dec_crefc t; dec_drefc v
+and inc_drefc (GValue (_, _, _, (drc, _), _)) = (drc := deref drc + 1)
+and inc_crefc (GValue (_, _, _, (_, crc), _)) = (crc := deref crc + 1)
+
+let build_pg : core -> pg_block = fun ast ->
+  let next_bid = counter () in
+  let next_vid = counter () in
+  let next_pid = counter () in
+  let new_block : pg_bid -> pg_time -> pg_value -> pg_block = fun bid time value ->
+    GBlock (bid, time, value)
+  in
+  let destroy_vars : (core_var_id * pg_value) list -> unit =
+    List.iter (fun (_, v) -> dec_drefc v)
+  in
+  let new_value bid name knd =
+    let refc = (ref 1, ref 0) in
+    GValue (next_vid (), name, bid, refc, knd)
+  in
+  let root_bid  = next_bid () in
+  let vtrue     = new_value root_bid "" VkTrue
+  and vfalse    = new_value root_bid "" VkFalse
+  and symbol    = new_value root_bid "" (VkPrim ("symbol", []))
+  and go_char c = new_value root_bid "" (VkCharLit c)
+  and go_int  i = new_value root_bid "" (VkIntLit i)
+  and go_str  s = new_value root_bid "" (VkStrLit s)
+  and vnull     = new_value root_bid "" VkStart in
+  let tstart    = (inc_crefc vnull; vnull) in
+
+  let prim_wrapper (arity : int) (prim_id : string) : pg_value =
+    let rec go bid lname n i params : pg_value =
+      if n = 0 then
+        new_value bid lname (VkPrim (prim_id, List.rev params))
+      else
+        let bid' = next_bid () in
+        let pid  = next_pid () in
+        let vname = prim_id ^ "/" ^ string_of_int i in
+        let param = new_value bid' vname (VkParam pid) in
+        let t_end = tstart in
+        let v_end = go bid' "" (n - 1) (i + 1) (param :: params) in
+        let block' = new_block bid' (inc_crefc t_end; t_end) v_end in
+        dec_drefc param;
+        new_value bid lname (VkLambda (pid :: [], (* inline? *) true, block'))
+    in go root_bid prim_id arity 0 []
+
+  and primc_wrapper (arity : int) (prim_id : string) : pg_value =
+    let rec go bid lname n i params : (* borrowed *) pg_time * (* owned *) pg_value =
+      if n = 0 then
+        let prim = new_value bid lname (VkPrimC (prim_id,
+                                                 (inc_crefc tstart; tstart),
+                                                 List.rev params)) in
+        (prim, prim)
+      else
+        let bid' = next_bid () in
+        let pid  = next_pid () in
+        let vname = prim_id ^ "/" ^ string_of_int i in
+        let param = new_value bid' vname (VkParam pid) in
+        let (t_end, v_end) = go bid' "" (n - 1) (i + 1) (param :: params) in
+        let block' = new_block bid' (inc_crefc t_end; t_end) v_end in
+        dec_drefc param;
+        (tstart, new_value bid lname (VkLambda (pid :: [], (* inline? *) true, block')))
+    in
+    snd (go root_bid prim_id arity 0 [])
+  in
+
+  let build (* TODO: potentially do some optimization *) = new_value in
+
+  let find_builtin : string -> string -> pg_value = fun prefix name ->
+    match (prefix, name) with
+    | ("", "print_endline") -> primc_wrapper 1 "print_endline"
+    | ("", "string_of_int") -> prim_wrapper 1 "string_of_int"
+    | _ -> invalid_arg ("TODO: builtin not supported: " ^ prefix ^ name)
+  in
+  let lookup_ctx (ctx : (core_var_id * pg_value) list) (v : core_var) : pg_value =
+    let (Binding (vname, varid, prov, _, _)) = v in
+    match prov with
+    | Builtin prefix -> find_builtin prefix vname
+    | User ->
+      let rec go =
+        function
+        | [] -> invalid_arg ("impossible: variable not in context: " ^ vname)
+        | (varid', value) :: ctx ->
+          if varid = varid' then (inc_drefc value; value) else go ctx
+      in go ctx
+  in
+  let rec go_expr : pg_bid -> (core_var_id * pg_value) list -> pg_vname -> core_expr -> pg_time -> (pg_time * pg_value) =
+    fun bid ctx name e t ->
+      match e with
+      | Tuple [] -> (t, (inc_drefc vnull; vnull))
+      | Tuple es ->
+        let (t, vs) = map_m state_monad (go_expr bid ctx "") es t in
+        (t, build bid name (VkVector vs))
+      | List es ->
+        let (t, vs) = map_m state_monad (go_expr bid ctx "") es t in
+        (t, build bid name (VkPrim ("list", vs)))
+      | Con (_, _) -> invalid_arg "TODO: Con"
+      | CharLit c -> (t, go_char c)
+      | IntLit i -> (t, go_int i)
+      | StrLit s -> (t, go_str s)
+      | Var v -> (t, lookup_ctx ctx v)
+      | OpenIn (_, _) ->
+        invalid_arg "OpenIn should no longer be present in core_expr"
+      | App (e1, e2) ->
+        let (t, vf) = go_expr bid ctx "" e1 t in
+        let (t, vx) = go_expr bid ctx "" e2 t in
+        let vapp = build bid name (VkApp (t, vf, vx :: [])) in
+        let t = (inc_crefc vapp; vapp) in
+        (t, vapp)
+      | LetIn (bs, e) ->
+        let (t, new_vars) = go_bindings bid ctx bs t in
+        let (t, v) = go_expr bid (new_vars @ ctx) name e t in
+        destroy_vars new_vars;
+        (t, v)
+      | Match (scrutinee, branches) -> invalid_arg "TODO: Match"
+      | IfThenElse (e_cond, e_then, e_else) -> invalid_arg "TODO: IfThenElse"
+      | Fun (args, body) ->
+        List.fold_right (* accumulate a function *)
+          (fun arg acc ->
+            fun bid ctx name t ->
+              let (Binding (vname, varid, _, _, _)) =
+                match arg with
+                | PVar v -> v
+                | _ -> invalid_arg "TODO: more complex patterns"
+              in
+              let bid' = next_bid () in
+              let pid  = next_pid () in
+              let param = build bid' vname (VkParam pid) in
+              let (t_end, v_end) = acc bid' ((varid, param) :: ctx) "" (inc_crefc tstart; tstart) in
+              let block' = new_block bid' t_end v_end in
+              dec_drefc param;
+              (t, build bid name (VkLambda (pid :: [], (* inline? *) false, block')))
+          )
+          args
+          (fun bid ctx name t -> go_expr bid ctx name body t)
+          bid ctx name t
+      | Function _ ->
+        invalid_arg "Function should no longer be present in core_expr"
+  and go_bindings : pg_bid -> (core_var_id * pg_value) list -> core_bindings -> pg_time ->
+                    pg_time * (core_var_id * pg_value) list =
+    fun bid initial_ctx (Bindings (is_rec, bs)) t ->
+      (if is_rec then invalid_arg "TODO: recursive bindings" else ());
+      List.fold_left (fun (t, new_vars) binding ->
+        let (Binding (vname, vid, _, _, _), e) =
+          match binding with
+          | (PVar v, [], _, e) -> (v, e)
+          | _ -> invalid_arg "TODO: more complex let bindings"
+        in
+        let (t, v) = go_expr bid initial_ctx vname e t in
+        inc_drefc v; (* ensure v is kept alive - caller is responsible to call
+                        `destroy_vars` on new_vars *)
+        (t, (vid, v) :: new_vars)
+      ) (t, []) bs
+  in
+  let (t_final, toplevel_vars) = List.fold_left (fun (t, ctx) bindings ->
+    let (t, vars) = go_bindings root_bid ctx bindings t in
+    (t, vars @ ctx)
+  ) ((* move *) tstart, []) ast in
+  let block = new_block root_bid t_final vnull in
+  destroy_vars toplevel_vars;
+  (dec_drefc vnull; dec_drefc symbol; dec_drefc vfalse; dec_drefc vtrue);
+  block
+
 type compile_target = | Scheme
                       | JS
 
@@ -2040,8 +2272,11 @@ let text =
   In_channel.close f;
   text
 
-let () =
+let core =
   Miniml.trace (fun () -> "Log level: " ^ string_of_int Miniml.log_level);
   match elab =<< (parse =<< lex text) with
-  | Ok core     -> print_endline (compile Scheme core)
+  | Ok core     -> core
   | Error (E e) -> (prerr_endline ("Error: " ^ e); exit 1)
+
+(* let pg = build_pg core *)
+let () = print_endline (compile Scheme core)
