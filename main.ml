@@ -1774,6 +1774,7 @@ let elab (ast : ast) : core m_result =
   in Ok (List.concat ast')
 
 type compile_target = | Scheme
+                      | JS
 
 let compile (target : compile_target) (decls : core) : string =
   let result = ref [] in
@@ -2025,9 +2026,12 @@ let compile (target : compile_target) (decls : core) : string =
     emit_ln "(load \"prelude.scm\")";
     emit_ln "";
     List.iter bindings decls
+  and js () =
+    invalid_arg "JS backend is TODO"
   in
   (match target with
-   | Scheme -> scheme ());
+   | Scheme -> scheme ()
+   | JS     -> js ());
   String.concat "" (List.rev (deref result))
 
 let text =
