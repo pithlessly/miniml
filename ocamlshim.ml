@@ -58,6 +58,21 @@ end = struct
     with DupExn e -> Error e
 end
 
+module IntMap : sig
+  type 'a t
+  val empty  : 'a t
+  val lookup : int -> 'a t -> 'a option
+  val insert : int -> 'a -> 'a t -> 'a t
+  val union  : 'a t -> 'a t -> 'a t
+end = struct
+  module Map = Map.Make(Int)
+  type 'a t = 'a Map.t
+  let empty = Map.empty
+  let lookup = Map.find_opt
+  let insert = Map.add
+  let union m1 m2 = Map.union (fun _ v1 _ -> Some v1) m1 m2
+end
+
 module Miniml = struct
   let log_level =
     match Sys.getenv_opt "MINIML_BOOTSTRAP_DEBUG" with

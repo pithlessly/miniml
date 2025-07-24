@@ -422,3 +422,37 @@
                   string=?
                   (lambda (dup-key) (k (vector 'Error (vector 'DupErr dup-key))))
                   m1 m2)))))))
+
+; =================================================
+; IntMap primitives implemented using the hash trie
+; =================================================
+
+(define (int-hash i)
+  (define mask32 #xffffffff)
+  (if (not (<= 0 i mask32))
+    (error "expected unsigned 32 bit integer") '())
+  (define (*% a b) (bitwise-and mask32 (* a b)))
+  ; 32bit->32bit hash taken from Murmur2_32
+  (define seed #xc70f6907)
+  (define m #x5bd1e995)
+  (define len 4)
+  (define h1 (bitwise-xor seed len))
+  (define k1 i)
+  (set! k1 (*% k1 m))
+  (set! k1 (bitwise-xor k1 (arithmetic-shift k1 -24)))
+  (set! k1 (*% k1 m))
+  (set! h1 (*% h1 m))
+  (set! h1 (bitwise-xor h1 k1))
+  (set! h1 (bitwise-xor h1 (arithmetic-shift h1 -13)))
+  (set! h1 (*% h1 m))
+  (set! h1 (bitwise-xor h1 (arithmetic-shift h1 -15)))
+  h1)
+
+(define miniml-IntMap.empty hashtrie-empty)
+(define miniml-IntMap.lookup (lambda (k) (lambda (m)
+  (define entry (hashtrie-lookup = (int-hash k) k m))
+  (if (null? entry) '() (list (ht-value entry))))))
+(define miniml-IntMap.insert (lambda (k) (lambda (v) (lambda (m)
+  (define new-map (hashtrie-insert = (int-hash k) k v m))
+  (if (null? new-map) m new-map)))))
+; (define (miniml-IntMap.union
