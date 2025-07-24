@@ -1,0 +1,15 @@
+#use "ocamlshim.ml" ;;
+#use "main.ml" ;;
+
+let fmt_ty f ty =
+  Format.pp_print_string f (show_ty ty) ;;
+let fmt_binding f (Binding (name, _, _, _, _)) =
+  Format.pp_print_string f ("'" ^ name ^ "'") ;;
+let fmt_cbinding f (CBinding (name, _, _, _, _, _)) =
+  Format.pp_print_string f ("'" ^ name ^ "'") ;;
+#install_printer fmt_ty ;;
+#install_printer fmt_binding ;;
+#install_printer fmt_cbinding ;;
+
+#print_depth 100 ;;
+#print_length 20000 ;;
