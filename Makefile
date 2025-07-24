@@ -11,7 +11,7 @@ target/%.ml: %.ml target
 	cp $< $@
 
 target/%.cmx: target/%.ml
-	$(OCAMLC) $<
+	$(OCAMLC) -c $<
 
 target/main.exe: target/main.ml target/ocamlshim.cmx
 	$(OCAMLC) -o $@ -I target ocamlshim.cmx -open Ocamlshim $<
