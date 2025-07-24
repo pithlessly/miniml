@@ -5,6 +5,10 @@
 
 (define (curry2 f) (lambda (a) (lambda (b)             (f a b)   )))
 (define (curry3 f) (lambda (a) (lambda (b) (lambda (c) (f a b c)))))
+(define (any ls p) (let loop ((ls ls))
+                     (if (null? ls) #f (or (p (car ls)) (loop (cdr ls))))))
+(define (filter ls p) (let loop ((t '()) (ls ls))
+                        (if (null? ls) (reverse t) (loop (if (p (car ls)) (cons (car ls) t) t) (cdr ls)))))
 
 ; =================
 ; MiniML primitives
@@ -310,6 +314,39 @@
       (null? l2)
       (and (let loop ((l2rest l2)) (and (p (car l1) (car l2rest)) (loop (cdr l2rest))))
            (all-pairs p (cdr l1) l2))))
+
+(define (hashtrie-branch-cardinality b)
+  (cond ((null?   b) 0)
+        ((vector? b) 1)
+        ((pair?   b) (+ (hashtrie-branch-cardinality (car b))
+                        (hashtrie-branch-cardinality (cdr b))))))
+
+(define (hashtrie-union key-eql? m1 m2)
+  (define (collision-chain-union c1 c2)
+    (append c1 (filter c2 (lambda (e2)
+      (not (any c1 (lambda (e1) (key-eql? (ht-key  e1) (ht-key  e2)))))))))
+  (define tree (let loop ((lvl 32)
+                          (b1 (cdr m1))
+                          (b2 (cdr m2)))
+                 (define (loop-pair b1 b2) (cons (loop (- lvl 1) (car b1) (car b2))
+                                                 (loop (- lvl 1) (cdr b1) (cdr b2))))
+                 (define (develop entry) (if (even? (arithmetic-shift (ht-hash entry) (- lvl 32)))
+                                           (cons entry '())
+                                           (const '() entry)))
+                 (cond ((zero? lvl) (collision-chain-union b1 b2))
+                       ((null? b1)            b2)
+                       ((null? b2)            b1)
+                       ((and (pair? b1)
+                             (pair? b2))      (loop-pair b1 b2))
+                       ((pair? b1)            (loop-pair b1 (develop b2)))
+                       ((pair? b2)            (loop-pair (develop b1) b2))
+                       ((and (= (ht-hash b1)
+                                (ht-hash b2))
+                             (key-eql?
+                               (ht-key b1)
+                               (ht-key b2)))  b1)
+                       (#t                    (loop-pair (develop b1) (develop b2))))))
+  (cons (hashtrie-branch-cardinality tree) tree))
 
 (define (hashtrie-disjoint-union key-eql? duplicate-key m1 m2)
   (cons
