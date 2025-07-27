@@ -27,7 +27,7 @@
   (lambda (a) (lambda (b)
     (cond
       ((or (integer? a) (char? a) (string? a)) (equal? a b))
-      (else (error "the = function claims to be polymorphic, but in reality we only support comparing ints, chars, and strings"))))))
+      (else (error #f "the = function claims to be polymorphic, but in reality we only support comparing ints, chars, and strings"))))))
 (define miniml-<>
   (lambda (a) (lambda (b)
     (not ((miniml-= a) b)))))
@@ -41,8 +41,8 @@
 (define (miniml-int_of_string s)
   (define n (string->number s))
   (cond
-    ((not n) (error "int_of_string: could not parse string as a number"))
-    ((not (integer? n)) (error "int_of_string: string was a number, but not an integer"))
+    ((not n) (error #f "int_of_string: could not parse string as a number"))
+    ((not (integer? n)) (error #f "int_of_string: string was a number, but not an integer"))
     (else n)))
 (define miniml-string_of_int number->string)
 (define miniml-int_of_char char->integer)
@@ -92,7 +92,7 @@
         ((and (null? xs) (null? ys)) (reverse acc))
         ((and (pair? xs) (pair? ys)) (let ((y ((f (car xs)) (car ys))))
                                        (loop (cons y acc) (cdr xs) (cdr ys))))
-        (else (error "Lists differ in length"))))))))
+        (else (error #f "Lists differ in length"))))))))
 (define miniml-List.mapi
   (lambda (f) (lambda (xs)
     (let loop ((acc '()) (i 0) (xs xs))
@@ -138,7 +138,7 @@
 (define (miniml-Option.unwrap opt)
   (if (pair? opt)
     (car opt)
-    (error "Option.unwrap: None")))
+    (error #f "Option.unwrap: None")))
 
 (define miniml-In_channel.open_text open-input-file)
 (define (miniml-In_channel.input_all port)
@@ -170,15 +170,15 @@
 ; =====================================================
 
 (define (miniml-match-failure)
-  (error "no pattern in match expression matched"))
+  (error #f "no pattern in match expression matched"))
 (define-syntax miniml-let-guard
   (syntax-rules () ((miniml-let-guard c)
    (define tmp (if c '()
-                     (error "irrefutable pattern in let binding did not match"))))))
+                     (error #f "irrefutable pattern in let binding did not match"))))))
 (define-syntax miniml-fun-guard
   (syntax-rules () ((miniml-fun-guard c)
    (define tmp (if c '()
-                     (error "irrefutable fun argument pattern did not match"))))))
+                     (error #f "irrefutable fun argument pattern did not match"))))))
 
 ; ===================================
 ; Persistent hash trie implementation
