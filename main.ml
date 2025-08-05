@@ -2013,8 +2013,6 @@ let compile (target : compile_target) (decls : core) : string =
       );
       emit_ln " ))"
     in
-    emit_ln "(load \"prelude.scm\")";
-    emit_ln "";
     List.iter bindings decls
   in
   (match target with

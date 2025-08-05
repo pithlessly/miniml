@@ -1,8 +1,8 @@
 OCAMLC := ocamlopt
 SCHEME_IMPL := chicken
 
-SCHEME_COMMAND_chicken := csi -s
-SCHEME_COMMAND_chez    := scheme --script
+SCHEME_COMMAND_chicken := csi compat_chicken.scm prelude.scm -script
+SCHEME_COMMAND_chez    := echo "(exit)" | scheme -q compat_chez.scm prelude.scm
 
 SCHEME_COMMAND    := $(SCHEME_COMMAND_$(SCHEME_IMPL))
 SCHEME_COMPAT_LIB := compat_$(SCHEME_IMPL).scm
@@ -25,14 +25,11 @@ target/main.exe: target/main.ml target/ocamlshim.cmx
 scratchpad.mini-ml: main.ml
 	cp $< $@
 
-target/compat.scm: $(SCHEME_COMPAT_LIB)
-	cp $< $@
-
 target/compiled.scm: target/main.exe scratchpad.mini-ml
 	$< > target/tmp.scm
 	cp target/tmp.scm $@
 
-target/compiled2.scm: target/compiled.scm prelude.scm target/compat.scm
+target/compiled2.scm: target/compiled.scm prelude.scm $(SCHEME_COMPAT_LIB)
 	$(SCHEME_COMMAND) $< > target/tmp2.scm
 	cp target/tmp2.scm $@
 

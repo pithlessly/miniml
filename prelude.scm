@@ -1,5 +1,3 @@
-(load "target/compat.scm")
-
 (define (curry2 f) (lambda (a) (lambda (b)             (f a b)   )))
 (define (curry3 f) (lambda (a) (lambda (b) (lambda (c) (f a b c)))))
 
