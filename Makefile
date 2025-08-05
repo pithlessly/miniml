@@ -34,7 +34,7 @@ target/compiled.scm: target/main.exe scratchpad.mini-ml
 
 target/compiled2.scm: target/compiled.scm prelude.scm target/compat.scm
 	$(SCHEME_COMMAND) $< > target/tmp2.scm
-	cp $< $@
+	cp target/tmp2.scm $@
 
 .PHONY: verify_bootstrapping
 verify_bootstrapping: target/compiled2.scm target/compiled.scm
