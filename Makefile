@@ -3,6 +3,7 @@ SCHEME_IMPL := chez
 
 SCHEME_COMMAND_chicken := csi compat_chicken.scm prelude.scm -script
 SCHEME_COMMAND_chez    := echo "(exit)" | scheme -q compat_chez.scm prelude.scm
+SCHEME_COMMAND_guile   := guile -l compat_guile.scm -l prelude.scm
 
 SCHEME_COMMAND    := $(SCHEME_COMMAND_$(SCHEME_IMPL))
 SCHEME_COMPAT_LIB := compat_$(SCHEME_IMPL).scm
