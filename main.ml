@@ -1040,47 +1040,48 @@ and unify_all : core_type list -> core_type list -> unit m_result = fun ts1 ts2 
   | (t1 :: ts1, t2 :: ts2) -> let* () = unify t1 t2 in unify_all ts1 ts2
   | _ -> Error (E "cannot unify different numbers of arguments")
 
-type core_module = | CModule of string * ctx_layer
-and  ctx_layer =    core_var list
-               *   core_cvar list
-               * core_tydecl list
-               * core_module list
-type ctx = | Ctx of ctx_layer * ctx option
-let empty_layer : ctx_layer = ([], [], [], [])
-let empty_ctx = Ctx (empty_layer, None)
-let ctx_find : (ctx_layer -> 'a list) -> ('a -> string) -> string -> ctx -> 'a option =
-  fun get_list get_name name ->
-    let rec go (Ctx (top, parent)) =
-      match List.find_opt (fun item -> get_name item = name) (get_list top) with
-      | Some x -> Some x
-      | None   -> match parent with | None -> None
-                                    | Some p -> go p
-    in go
-let lookup     : string -> ctx ->    core_var option = ctx_find (fun (vars, _, _, _) -> vars)
-                                                                (fun (Binding (name, _, _, _, _)) -> name)
-let lookup_con : string -> ctx ->   core_cvar option = ctx_find (fun (_, cvars, _, _) -> cvars)
-                                                                (fun (CBinding (name, _, _, _, _, _)) -> name)
-let lookup_ty  : string -> ctx -> core_tydecl option = ctx_find (fun (_, _, cons, _) -> cons)
-                                                                (fun (CDatatype (CCon (name, _), _) |
-                                                                      CAlias    (CCon (name, _), _, _, _)) -> name)
-let lookup_mod : string -> ctx -> core_module option = ctx_find (fun (_, _, _, modules) -> modules)
-                                                                (fun (CModule (name, _)) -> name)
+module Ctx = struct
+  type module_ = | CModule of string * layer
+  and  layer =    core_var list
+             *   core_cvar list
+             * core_tydecl list
+             *     module_ list
+  type t = | Ctx of layer * t option
+  let empty_layer : layer = ([], [], [], [])
+  let find : (layer -> 'a list) -> ('a -> string) -> string -> t -> 'a option =
+    fun get_list get_name name ->
+      let rec go (Ctx (top, parent)) =
+        match List.find_opt (fun item -> get_name item = name) (get_list top) with
+        | Some x -> Some x
+        | None   -> match parent with | None -> None
+                                      | Some p -> go p
+      in go
+  let lookup     : string -> t ->    core_var option = find (fun (vars, _, _, _) -> vars)
+                                                            (fun (Binding (name, _, _, _, _)) -> name)
+  let lookup_con : string -> t ->   core_cvar option = find (fun (_, cvars, _, _) -> cvars)
+                                                            (fun (CBinding (name, _, _, _, _, _)) -> name)
+  let lookup_ty  : string -> t -> core_tydecl option = find (fun (_, _, cons, _) -> cons)
+                                                            (fun (CDatatype (CCon (name, _), _) |
+                                                                  CAlias    (CCon (name, _), _, _, _)) -> name)
+  let lookup_mod : string -> t ->     module_ option = find (fun (_, _, _, modules) -> modules)
+                                                            (fun (CModule (name, _)) -> name)
 
-let layer_extend     (vars, cvars, cons, modules) v   = (v :: vars, cvars, cons, modules)
-let layer_extend_con (vars, cvars, cons, modules) cv  = (vars, cv :: cvars, cons, modules)
-let layer_extend_ty  (vars, cvars, cons, modules) con = (vars, cvars, con :: cons, modules)
-let layer_extend_mod (vars, cvars, cons, modules) m   = (vars, cvars, cons, m :: modules)
-let ctx_update : (ctx_layer -> 'a -> ctx_layer) -> ctx -> 'a -> ctx =
-  fun f (Ctx (top, parent)) x -> Ctx (f top x, parent)
-let extend     = ctx_update layer_extend
-let extend_con = ctx_update layer_extend_con
-let extend_ty  = ctx_update layer_extend_ty
-let extend_mod = ctx_update layer_extend_mod
-let extend_open : ctx -> string -> ctx option =
-  fun ctx mod_name ->
-    Option.map (fun (CModule (_, layer)) -> Ctx (layer, Some ctx)) (lookup_mod mod_name ctx)
-let extend_new_layer : ctx -> ctx =
-  fun ctx -> Ctx (empty_layer, Some ctx)
+  let layer_extend     (vars, cvars, cons, modules) v   = (v :: vars, cvars, cons, modules)
+  let layer_extend_con (vars, cvars, cons, modules) cv  = (vars, cv :: cvars, cons, modules)
+  let layer_extend_ty  (vars, cvars, cons, modules) con = (vars, cvars, con :: cons, modules)
+  let layer_extend_mod (vars, cvars, cons, modules) m   = (vars, cvars, cons, m :: modules)
+  let update : (layer -> 'a -> layer) -> t -> 'a -> t =
+    fun f (Ctx (top, parent)) x -> Ctx (f top x, parent)
+  let extend     = update layer_extend
+  let extend_con = update layer_extend_con
+  let extend_ty  = update layer_extend_ty
+  let extend_mod = update layer_extend_mod
+  let extend_open : t -> string -> t option =
+    fun ctx mod_name ->
+      Option.map (fun (CModule (_, layer)) -> Ctx (layer, Some ctx)) (lookup_mod mod_name ctx)
+  let extend_new_layer : t -> t =
+    fun ctx -> Ctx (empty_layer, Some ctx)
+end
 
 let initial_ctx
   (next_var_id : unit -> core_var_id)
@@ -1096,30 +1097,30 @@ let initial_ctx
   let c = QVar ("c", next_var_id ()) in
   let qabc = c :: qab and c = CQVar c in
   let rec mk_ctx callback prefix =
-    let ctx = ref empty_layer in
+    let ctx = ref Ctx.empty_layer in
     let provenance = Builtin prefix in
     let add name qvars ty =
-      ctx := layer_extend (deref ctx)
+      ctx := Ctx.layer_extend (deref ctx)
                (Binding (name, next_var_id (), provenance, qvars, ty))
     in
     let add_con name qvars params result =
-      ctx := layer_extend_con (deref ctx)
+      ctx := Ctx.layer_extend_con (deref ctx)
                (CBinding (name, next_var_id (), provenance, qvars, params, result))
     in
     let add_ty name arity =
       let con = CCon (name, next_con_id ()) in
-      (ctx := layer_extend_ty (deref ctx) (CDatatype (con, arity)); con)
+      (ctx := Ctx.layer_extend_ty (deref ctx) (CDatatype (con, arity)); con)
     in
     let add_alias name def =
       let con = CCon (name, next_con_id ()) in
-      (ctx := layer_extend_ty (deref ctx) (CAlias (con, 0, [], def)); def)
+      (ctx := Ctx.layer_extend_ty (deref ctx) (CAlias (con, 0, [], def)); def)
     in
     let add_mod name m =
-      ctx := layer_extend_mod (deref ctx) (CModule (name, m (prefix ^ name ^ ".")))
+      ctx := Ctx.layer_extend_mod (deref ctx) Ctx.(CModule (name, m (prefix ^ name ^ ".")))
     in
     (callback add add_con add_ty add_alias add_mod; deref ctx)
   in
-  let top_level callback = Ctx (mk_ctx callback (* prefix: *) "", None) in
+  let top_level callback = Ctx.(Ctx (mk_ctx callback (* prefix: *) "", None)) in
   top_level (fun add add_con add_ty add_alias add_mod ->
     let ty0 name = CTCon (add_ty name 0, [])
     and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
@@ -1261,7 +1262,7 @@ let preprocess_constructor_args
   (mk_tuple : 'a list -> 'a) ctx name (args : 'a list option)
   : (core_cvar * core_type list * core_type * 'a list) m_result =
   let* cv =
-    match lookup_con name ctx with
+    match Ctx.lookup_con name ctx with
     | None    -> Error (E ("constructor not in scope: " ^ name))
     | Some cv -> Ok cv
   in
@@ -1295,7 +1296,7 @@ let elab (ast : ast) : core m_result =
   let initial_ctx = initial_ctx next_var_id next_con_id in
   let (ty0, ty1, ty2) =
     let expect_arity n name =
-      match lookup_ty name initial_ctx with
+      match Ctx.lookup_ty name initial_ctx with
       | Some (CDatatype (c, arity)) ->
         if arity = n then c
         else invalid_arg ("impossible: expected arity " ^ string_of_int n)
@@ -1307,7 +1308,7 @@ let elab (ast : ast) : core m_result =
      (fun name -> let c = expect_arity 2 name in fun a b -> CTCon (c, a :: b :: [])))
   in
   let (-->)    = ty2 "->"
-  and t_tuple  = match lookup_ty "*" initial_ctx with
+  and t_tuple  = match Ctx.lookup_ty "*" initial_ctx with
                  | Some (CDatatype (c, _)) -> fun args -> CTCon (c, args)
                  | _ -> invalid_arg "impossible"
   and t_char   = ty0 "char"
@@ -1347,11 +1348,11 @@ let elab (ast : ast) : core m_result =
                             ^ " " ^ describe_span sp))
         | Some ty -> Ok ty)
       | TCon (MModule mod_name :: ms, name, sp, args) ->
-        (match extend_open ctx mod_name with
+        (match Ctx.extend_open ctx mod_name with
          | None     -> Error (E ("module not in scope: " ^ mod_name))
          | Some ctx -> go ctx (TCon (ms, name, sp, args)))
       | TCon ([], name, sp, args) ->
-        match lookup_ty name ctx with
+        match Ctx.lookup_ty name ctx with
         | None -> Error (E ("type constructor not in scope: " ^ name))
         | Some decl ->
           let (CDatatype (con, arity) | CAlias (con, arity, _, _)) = decl in
@@ -1367,7 +1368,7 @@ let elab (ast : ast) : core m_result =
     in go ctx
   in
   let translate_ast_typ_decl : (string list * string * ast_typ_decl) list ->
-                               ctx -> ctx m_result =
+                               Ctx.t -> Ctx.t m_result =
     (* we process a group of type declarations in several stages, to avoid
        creating cyclic type aliases:
        - extend the context with all the *declarations* of ADTs simultaneously;
@@ -1375,9 +1376,9 @@ let elab (ast : ast) : core m_result =
          current context and then extending the context;
        - extend the context with the constructors of all ADTs. *)
     fun decls ctx ->
-    let* ((add_adts    : ctx -> ctx m_result),
-          (add_aliases : ctx -> ctx m_result),
-          (add_conss   : ctx -> ctx m_result))
+    let* ((add_adts    : Ctx.t -> Ctx.t m_result),
+          (add_aliases : Ctx.t -> Ctx.t m_result),
+          (add_conss   : Ctx.t -> Ctx.t m_result))
     = fold_left_m error_monad (fun (add_adts, add_aliases, add_conss)
                                    (ty_params, name, decl) ->
         let arity = List.length ty_params in
@@ -1392,7 +1393,7 @@ let elab (ast : ast) : core m_result =
         in
         let tvs = tvs_from_map ty_params_map in
         let ty_params = List.map snd ty_params_qvs in
-        let* con = match lookup_ty name ctx with
+        let* con = match Ctx.lookup_ty name ctx with
                    | Some _ -> (* this check is not strictly necessary *)
                                Error (E ("duplicate type name: " ^ name))
                    | None   -> Ok (CCon (name, next_con_id ()))
@@ -1402,20 +1403,20 @@ let elab (ast : ast) : core m_result =
           (* step 1 *)
           let add_adts' ctx =
             let* ctx = add_adts ctx in
-            Ok (extend_ty ctx (CDatatype (con, arity)))
+            Ok (Ctx.extend_ty ctx (CDatatype (con, arity)))
           in
           (* step 3 *)
           let return_type = CTCon (con, List.map (fun qv -> CQVar qv) ty_params) in
           let add_conss' ctx =
             let* ctx = add_conss ctx in
             fold_left_m error_monad (fun ctx (name, param_tys) ->
-              let* () = match lookup_con name ctx with
+              let* () = match Ctx.lookup_con name ctx with
                         | Some _ -> (* we don't yet know how to disambiguate *)
                                     Error (E ("duplicate constructor name: " ^ name))
                         | None   -> Ok () in
               let* param_tys' = map_m error_monad (translate_ast_typ ctx tvs)
                                                   param_tys
-              in Ok (extend_con ctx (
+              in Ok (Ctx.extend_con ctx (
                 CBinding (name,
                           next_var_id (),
                           User,
@@ -1429,7 +1430,7 @@ let elab (ast : ast) : core m_result =
           let add_aliases' ctx =
             let* ctx = add_aliases ctx in
             let* ty' = translate_ast_typ ctx tvs ty in
-            Ok (extend_ty ctx (
+            Ok (Ctx.extend_ty ctx (
               CAlias (con,
                       arity,
                       ty_params,
@@ -1561,7 +1562,7 @@ let elab (ast : ast) : core m_result =
                          | Some v -> let (Binding (_, _, _, _, ty)) = v in
                                      Ok (PVar v, ty))
       | POpenIn (MModule name, p)
-                     -> (match extend_open ctx name with
+                     -> (match Ctx.extend_open ctx name with
                          | Some ctx -> go ctx p
                          | None     -> Error (E ("module not in scope: " ^ name)))
       | PAsc (p, ty) -> let* (p', ty1) = go ctx p in
@@ -1572,15 +1573,15 @@ let elab (ast : ast) : core m_result =
     in go ctx
   in
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
-  let infer_pat lvl tvs : ctx -> ast_pat -> (ctx * (core_pat * core_type)) m_result =
+  let infer_pat lvl tvs : Ctx.t -> ast_pat -> (Ctx.t * (core_pat * core_type)) m_result =
     fun ctx pat ->
     let* bindings = pat_bound_vars lvl pat in
     let* pat' = infer_pat_with_vars lvl tvs ctx bindings pat in
-    let ctx' = StringMap.fold (fun ctx _ v -> extend ctx v) ctx bindings in
+    let ctx' = StringMap.fold (fun ctx _ v -> Ctx.extend ctx v) ctx bindings in
     Ok (ctx', pat')
   in
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
-  let infer_pats lvl tvs : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list) m_result =
+  let infer_pats lvl tvs : Ctx.t -> ast_pat list -> (Ctx.t * (core_pat * core_type) list) m_result =
     Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl tvs)))
   in
   let rec infer lvl ctx : ast_expr -> (core_expr * core_type) m_result =
@@ -1611,14 +1612,14 @@ let elab (ast : ast) : core m_result =
     | IntLit i -> Ok (IntLit i, t_int)
     | StrLit s -> Ok (StrLit s, t_string)
     | Var (s, sp) ->
-            (match lookup s ctx with
+            (match Ctx.lookup s ctx with
             | None -> Error (E ("variable not in scope: " ^ s ^ " " ^ describe_span sp))
             | Some v ->
               let (Binding (_, _, _, qvars, ty)) = v in
               let ty = instantiate lvl qvars () ty in
               Ok (Var v, ty))
     | OpenIn (MModule name, e) -> (
-      match extend_open ctx name with
+      match Ctx.extend_open ctx name with
       | Some ctx -> infer lvl ctx e
       | None     -> Error (E ("module not in scope: " ^ name)))
     | App (e1, e2) ->
@@ -1684,7 +1685,7 @@ let elab (ast : ast) : core m_result =
         ground ty_arg --> ground ty_res
       )
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
-  and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings) m_result =
+  and infer_bindings lvl : Ctx.t -> ast_bindings -> (Ctx.t * core_bindings) m_result =
     fun ctx (Bindings (is_rec, bindings)) ->
     let lvl' = lvl + 1 in
     let tvs = tvs_new_dynamic (fun s -> new_uvar lvl' (Some s) ()) () in
@@ -1708,7 +1709,7 @@ let elab (ast : ast) : core m_result =
     (* the context used for the bindings contains these variables iff the binding group
        is recursive *)
     let ctx_inner = if is_rec
-                    then StringMap.fold (fun ctx _ v -> extend ctx v) ctx vars
+                    then StringMap.fold (fun ctx _ v -> Ctx.extend ctx v) ctx vars
                     else ctx
     in
     (* infer each binding *)
@@ -1791,12 +1792,12 @@ let elab (ast : ast) : core m_result =
     in
     let bindings = List.map (fun (_, _, binding) -> binding) bindings in
     Ok (
-      List.fold_left extend ctx bound_vars,
+      List.fold_left Ctx.extend ctx bound_vars,
       Bindings (is_rec, bindings)
     )
   in
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
-  let rec translate_decls (ctx : ctx) : ast_decl list -> (ctx * core_bindings list list) m_result =
+  let rec translate_decls ctx : ast_decl list -> (Ctx.t * core_bindings list list) m_result =
     fun decls ->
     map_m error_state_monad
         (fun decl ctx ->
@@ -1805,11 +1806,11 @@ let elab (ast : ast) : core m_result =
                                           Ok (ctx, bindings' :: [])
           | Types decls                -> let* ctx = translate_ast_typ_decl decls ctx in
                                           Ok (ctx, [])
-          | Module ((name, sp), decls) -> let ctx' = extend_new_layer ctx in
+          | Module ((name, sp), decls) -> let ctx' = Ctx.extend_new_layer ctx in
                                           (* because translate_decls only extends the topmost layer of the context it is passed,
                                              we know that the discarded parent here must be the same as `ctx` *)
-                                          let* (Ctx (new_layer, _), inner_bindings) = translate_decls ctx' decls in
-                                          let ctx = extend_mod ctx (CModule (name, new_layer)) in
+                                          let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' decls in
+                                          let ctx = Ctx.extend_mod ctx Ctx.(CModule (name, new_layer)) in
                                           (* TODO: use of List.concat here is not ideal for performance *)
                                           Ok (ctx, List.concat inner_bindings)
         ) decls ctx
