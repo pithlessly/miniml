@@ -23,6 +23,7 @@ type token =
   | KType | KOf
   | KModule
   | KStruct | KEnd
+  | KOpen
   | KLet | KRec | KAnd | KIn
   | KIf | KThen | KElse
   | KMatch | KWith
@@ -136,6 +137,7 @@ module Lex = struct
           | "type" -> KType | "of" -> KOf
           | "module" -> KModule
           | "struct" -> KStruct | "end" -> KEnd
+          | "open" -> KOpen
           | "let" -> KLet | "rec" -> KRec
           | "and" -> KAnd | "in" -> KIn
           | "if" -> KIf | "then" -> KThen | "else" -> KElse
@@ -253,6 +255,7 @@ type ast_decl     = | Let      of ast_bindings
                                   * ast_typ_decl
                                   ) list
                     | Module   of (string * span) * ast_decl list
+                    | Open     of (string * span)
 type ast = ast_decl list
 
 module Parser = struct
@@ -832,6 +835,9 @@ module Parser = struct
       | KModule :: input ->
         module_decl input (fun input (name, decls) ->
         k input (Some (Module (name, decls))))
+      | KOpen :: input ->
+        ident_upper input (fun input name ->
+        k input (Some (Open name)))
       | _ -> k input None
     ) input k
   and module_decl input k =
@@ -1083,9 +1089,15 @@ module Ctx = struct
   let extend_con = update layer_extend_con
   let extend_ty  = update layer_extend_ty
   let extend_mod = update layer_extend_mod
-  let extend_open : t -> string -> t option =
+  let extend_open_over : t -> string -> t option =
     fun ctx mod_name ->
-      Option.map (fun (CModule (_, layer)) -> Ctx (layer, Some ctx)) (lookup_mod mod_name ctx)
+      Option.map (fun (CModule (_, layer)) -> Ctx (layer, Some ctx))
+        (lookup_mod mod_name ctx)
+  let extend_open_under : t -> string -> t option =
+    fun ctx mod_name ->
+      let (Ctx (top_layer, parent)) = ctx in
+      Option.map (fun (CModule (_, layer)) -> Ctx (top_layer, Some (Ctx (layer, parent))))
+        (lookup_mod mod_name ctx)
   let extend_new_layer : t -> t =
     fun ctx -> Ctx (empty_layer, Some ctx)
 end
@@ -1355,7 +1367,7 @@ let elab (ast : ast) : core m_result =
                             ^ " " ^ describe_span sp))
         | Some ty -> Ok ty)
       | TCon (MModule mod_name :: ms, name, sp, args) ->
-        (match Ctx.extend_open ctx mod_name with
+        (match Ctx.extend_open_over ctx mod_name with
          | None     -> Error (E ("module not in scope: " ^ mod_name))
          | Some ctx -> go ctx (TCon (ms, name, sp, args)))
       | TCon ([], name, sp, args) ->
@@ -1569,7 +1581,7 @@ let elab (ast : ast) : core m_result =
                          | Some v -> let (Binding (_, _, _, _, ty)) = v in
                                      Ok (PVar v, ty))
       | POpenIn (MModule name, p)
-                     -> (match Ctx.extend_open ctx name with
+                     -> (match Ctx.extend_open_over ctx name with
                          | Some ctx -> go ctx p
                          | None     -> Error (E ("module not in scope: " ^ name)))
       | PAsc (p, ty) -> let* (p', ty1) = go ctx p in
@@ -1626,7 +1638,7 @@ let elab (ast : ast) : core m_result =
               let ty = instantiate lvl qvars () ty in
               Ok (Var v, ty))
     | OpenIn (MModule name, e) -> (
-      match Ctx.extend_open ctx name with
+      match Ctx.extend_open_over ctx name with
       | Some ctx -> infer lvl ctx e
       | None     -> Error (E ("module not in scope: " ^ name)))
     | App (e1, e2) ->
@@ -1803,7 +1815,7 @@ let elab (ast : ast) : core m_result =
       Bindings (is_rec, bindings)
     )
   in
-  (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
+  (* TODO: enforce statically that this does not modify the parent of `ctx` *)
   let rec translate_decls ctx : ast_decl list -> (Ctx.t * core_bindings list list) m_result =
     fun decls ->
     map_m error_state_monad
@@ -1814,12 +1826,13 @@ let elab (ast : ast) : core m_result =
           | Types decls                -> let* ctx = translate_ast_typ_decl decls ctx in
                                           Ok (ctx, [])
           | Module ((name, sp), decls) -> let ctx' = Ctx.extend_new_layer ctx in
-                                          (* because translate_decls only extends the topmost layer of the context it is passed,
-                                             we know that the discarded parent here must be the same as `ctx` *)
                                           let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' decls in
-                                          let ctx = Ctx.extend_mod ctx Ctx.(CModule (name, new_layer)) in
+                                          let ctx = Ctx.(extend_mod ctx (CModule (name, new_layer))) in
                                           (* TODO: use of List.concat here is not ideal for performance *)
                                           Ok (ctx, List.concat inner_bindings)
+          | Open (name, sp)            -> match Ctx.extend_open_under ctx name with
+                                          | Some ctx -> Ok (ctx, [])
+                                          | None     -> Error (E ("module not in scope: " ^ name))
         ) decls ctx
   in
   let* (_, ast') = translate_decls initial_ctx ast
