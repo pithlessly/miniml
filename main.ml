@@ -1013,36 +1013,45 @@ and unify_all : core_type list -> core_type list -> unit m_result = fun ts1 ts2 
   | (t1 :: ts1, t2 :: ts2) -> let* () = unify t1 t2 in unify_all ts1 ts2
   | _ -> Error (E "cannot unify different numbers of arguments")
 
-type ctx = | Ctx of core_var list         (* variables *)
-                  * core_cvar list        (* constructors *)
-                  * core_tydecl list      (* type declarations *)
-                  * (string * ctx) list   (* modules *)
-let empty_ctx = Ctx ([], [], [], [])
-let lookup : string -> ctx -> core_var option =
-  fun name (Ctx (vars, _, _, _)) ->
-    List.find_opt (fun (Binding (name', _, _, _, _)) -> name = name') vars
-let lookup_con : string -> ctx -> core_cvar option =
-  fun name (Ctx (_, cvars, _, _)) ->
-    List.find_opt (fun (CBinding (name', _, _, _, _, _)) -> name = name') cvars
-let lookup_ty : string -> ctx -> core_tydecl option =
-  fun name (Ctx (_, _, cons, _)) ->
-    List.find_opt (fun (CDatatype (CCon (name', _), _) |
-                        CAlias    (CCon (name', _), _, _, _)) ->
-                     name = name') cons
-let extend : ctx -> core_var -> ctx =
-  fun (Ctx (vars, cvars, cons, modules)) v -> Ctx (v :: vars, cvars, cons, modules)
-let extend_con : ctx -> core_cvar -> ctx =
-  fun (Ctx (vars, cvars, cons, modules)) cv -> Ctx (vars, cv :: cvars, cons, modules)
-let extend_ty : ctx -> core_tydecl -> ctx =
-  fun (Ctx (vars, cvars, cons, modules)) con -> Ctx (vars, cvars, con :: cons, modules)
-let extend_mod : ctx -> (string * ctx) -> ctx =
-  fun (Ctx (vars, cvars, cons, modules)) m -> Ctx (vars, cvars, cons, m :: modules)
+type core_module = | CModule of string * ctx_layer
+and  ctx_layer =    core_var list
+               *   core_cvar list
+               * core_tydecl list
+               * core_module list
+type ctx = | Ctx of ctx_layer * ctx option
+let empty_layer : ctx_layer = ([], [], [], [])
+let empty_ctx = Ctx (empty_layer, None)
+let ctx_find : (ctx_layer -> 'a list) -> ('a -> string) -> string -> ctx -> 'a option =
+  fun get_list get_name name ->
+    let rec go (Ctx (top, parent)) =
+      match List.find_opt (fun item -> get_name item = name) (get_list top) with
+      | Some x -> Some x
+      | None   -> match parent with | None -> None
+                                    | Some p -> go p
+    in go
+let lookup     : string -> ctx ->    core_var option = ctx_find (fun (vars, _, _, _) -> vars)
+                                                                (fun (Binding (name, _, _, _, _)) -> name)
+let lookup_con : string -> ctx ->   core_cvar option = ctx_find (fun (_, cvars, _, _) -> cvars)
+                                                                (fun (CBinding (name, _, _, _, _, _)) -> name)
+let lookup_ty  : string -> ctx -> core_tydecl option = ctx_find (fun (_, _, cons, _) -> cons)
+                                                                (fun (CDatatype (CCon (name, _), _) |
+                                                                      CAlias    (CCon (name, _), _, _, _)) -> name)
+let lookup_mod : string -> ctx -> core_module option = ctx_find (fun (_, _, _, modules) -> modules)
+                                                                (fun (CModule (name, _)) -> name)
+
+let layer_extend     (vars, cvars, cons, modules) v   = (v :: vars, cvars, cons, modules)
+let layer_extend_con (vars, cvars, cons, modules) cv  = (vars, cv :: cvars, cons, modules)
+let layer_extend_ty  (vars, cvars, cons, modules) con = (vars, cvars, con :: cons, modules)
+let layer_extend_mod (vars, cvars, cons, modules) m   = (vars, cvars, cons, m :: modules)
+let ctx_update : (ctx_layer -> 'a -> ctx_layer) -> ctx -> 'a -> ctx =
+  fun f (Ctx (top, parent)) x -> Ctx (f top x, parent)
+let extend     = ctx_update layer_extend
+let extend_con = ctx_update layer_extend_con
+let extend_ty  = ctx_update layer_extend_ty
+let extend_mod = ctx_update layer_extend_mod
 let extend_open : ctx -> string -> ctx option =
-  fun (Ctx (vars, cvars, cons, modules)) name ->
-    match List.find_opt (fun (name', _) -> name = name') modules with
-    | None -> None
-    | Some (_, Ctx (vars', cvars', cons', modules')) ->
-      Some (Ctx (vars' @ vars, cvars' @ cvars, cons' @ cons, modules' @ modules))
+  fun ctx mod_name ->
+    Option.map (fun (CModule (_, layer)) -> Ctx (layer, Some ctx)) (lookup_mod mod_name ctx)
 
 let initial_ctx
   (next_var_id : unit -> core_var_id)
@@ -1058,30 +1067,31 @@ let initial_ctx
   let c = QVar ("c", next_var_id ()) in
   let qabc = c :: qab and c = CQVar c in
   let rec mk_ctx callback prefix =
-    let ctx = ref empty_ctx in
+    let ctx = ref empty_layer in
     let provenance = Builtin prefix in
     let add name qvars ty =
-      ctx := extend (deref ctx)
+      ctx := layer_extend (deref ctx)
                (Binding (name, next_var_id (), provenance, qvars, ty))
     in
     let add_con name qvars params result =
-      ctx := extend_con (deref ctx)
+      ctx := layer_extend_con (deref ctx)
                (CBinding (name, next_var_id (), provenance, qvars, params, result))
     in
     let add_ty name arity =
       let con = CCon (name, next_con_id ()) in
-      (ctx := extend_ty (deref ctx) (CDatatype (con, arity)); con)
+      (ctx := layer_extend_ty (deref ctx) (CDatatype (con, arity)); con)
     in
     let add_alias name def =
       let con = CCon (name, next_con_id ()) in
-      (ctx := extend_ty (deref ctx) (CAlias (con, 0, [], def)); def)
+      (ctx := layer_extend_ty (deref ctx) (CAlias (con, 0, [], def)); def)
     in
     let add_mod name m =
-      ctx := extend_mod (deref ctx) (name, m (prefix ^ name ^ "."))
+      ctx := layer_extend_mod (deref ctx) (CModule (name, m (prefix ^ name ^ ".")))
     in
     (callback add add_con add_ty add_alias add_mod; deref ctx)
   in
-  mk_ctx (fun add add_con add_ty add_alias add_mod ->
+  let top_level callback = Ctx (mk_ctx callback (* prefix: *) "", None) in
+  top_level (fun add add_con add_ty add_alias add_mod ->
     let ty0 name = CTCon (add_ty name 0, [])
     and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
     and ty2 name = let c = add_ty name 2 in fun a b -> CTCon (c, a :: b :: [])
@@ -1214,7 +1224,7 @@ let initial_ctx
       ()
     ));
     ()
-  ) ""
+  )
 
 let preprocess_constructor_args
   (* TODO: move into elab once we support generalizing nested functions *)
