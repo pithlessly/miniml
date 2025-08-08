@@ -1,44 +1,47 @@
-type span = | LineNo of int
-let dummy_span = LineNo (0 - 1)
-let describe_span (LineNo n) =
-  if n = 0 - 1 then "(dummy)"
-  else "(near line " ^ string_of_int n ^ ")"
-
 type error = | E of string
 type 'a m_result = ('a, error) result
 
-type token =
-  | OpenParen
-  | CloseParen
-  | OpenBracket
-  | CloseBracket
-  | Dot
-  | Colon
-  | Comma
-  | Semicolon
-  | Equal
-  | Pipe
-  | Arrow
-  | KTrue | KFalse
-  | KType | KOf
-  | KModule
-  | KStruct | KEnd
-  | KOpen
-  | KLet | KRec | KAnd | KIn
-  | KIf | KThen | KElse
-  | KMatch | KWith
-  | KFun
-  | KFunction
-  | KUnder
-  | IdentLower of string * span
-  | IdentUpper of string * span
-  | IdentSymbol of string * span
-  | IdentQuote of string * span
-  | TkCharLit of char
-  | TkIntLit of int
-  | TkStrLit of string
+module Token = struct
+  type span = | LineNo of int
+  let dummy_span = LineNo (0 - 1)
+  let describe_span (LineNo n) =
+    if n = 0 - 1 then "(dummy)"
+    else "(near line " ^ string_of_int n ^ ")"
+
+  type token =
+    | OpenParen
+    | CloseParen
+    | OpenBracket
+    | CloseBracket
+    | Dot
+    | Colon
+    | Comma
+    | Semicolon
+    | Equal
+    | Pipe
+    | Arrow
+    | KTrue | KFalse
+    | KType | KOf
+    | KModule
+    | KStruct | KEnd
+    | KOpen
+    | KLet | KRec | KAnd | KIn
+    | KIf | KThen | KElse
+    | KMatch | KWith
+    | KFun
+    | KFunction
+    | KUnder
+    | IdentLower of string * span
+    | IdentUpper of string * span
+    | IdentSymbol of string * span
+    | IdentQuote of string * span
+    | TkCharLit of char
+    | TkIntLit of int
+    | TkStrLit of string
+end
 
 module Lex = struct
+  open Token
   (* character properties *)
   let lower c = Char.(('a' <= c && c <= 'z') || c = '_' || c = '\'')
   let upper c = Char.('A' <= c && c <= 'Z')
@@ -241,12 +244,12 @@ let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
                            | []     -> go_expr e
   in go
 
-type ast_typ = | TVar of string * span
-               | TCon of mod_expr list * string * span * ast_typ list
-type ast_pat      = (string * span, string, ast_typ) pat
-type ast_binding  = (string * span, string, ast_typ) binding
-type ast_bindings = (string * span, string, ast_typ) bindings
-type ast_expr     = (string * span, string, ast_typ) expr
+type ast_typ = | TVar of string * Token.span
+               | TCon of mod_expr list * string * Token.span * ast_typ list
+type ast_pat      = (string * Token.span, string, ast_typ) pat
+type ast_binding  = (string * Token.span, string, ast_typ) binding
+type ast_bindings = (string * Token.span, string, ast_typ) bindings
+type ast_expr     = (string * Token.span, string, ast_typ) expr
 type ast_typ_decl = | Datatype of (string * ast_typ list) list
                     | Alias    of ast_typ
 type ast_decl     = | Let      of ast_bindings
@@ -254,11 +257,13 @@ type ast_decl     = | Let      of ast_bindings
                                   * string
                                   * ast_typ_decl
                                   ) list
-                    | Module   of (string * span) * ast_decl list
-                    | Open     of (string * span)
+                    | Module   of (string * Token.span) * ast_decl list
+                    | Open     of (string * Token.span)
 type ast = ast_decl list
 
 module Parser = struct
+
+  open Token
 
   (* precedence walker *)
 
@@ -383,7 +388,7 @@ module Parser = struct
   and k_with      : unit parser
                   = fun input k -> match input with | KWith   :: input -> k input ()
                                                     | _                -> Error (E "expected 'with'")
-  and ident_upper : (string * span) parser
+  and ident_upper : (string * Token.span) parser
                   = fun input k -> match input with | IdentUpper (name, sp) :: input -> k input (name, sp)
                                                     | _                              -> Error (E "expected uppercase identifier")
 
@@ -1364,7 +1369,7 @@ let elab (ast : ast) : core m_result =
       | TVar (s, sp) ->
         (match tvs_lookup tvs s with
         | None -> Error (E ("(impossible?) binding not found for tvar: " ^ s
-                            ^ " " ^ describe_span sp))
+                            ^ " " ^ Token.describe_span sp))
         | Some ty -> Ok ty)
       | TCon (MModule mod_name :: ms, name, sp, args) ->
         (match Ctx.extend_open_over ctx mod_name with
@@ -1376,7 +1381,7 @@ let elab (ast : ast) : core m_result =
         | Some decl ->
           let (CDatatype (con, arity) | CAlias (con, arity, _, _)) = decl in
           if arity <> List.length args && arity >= 0 then
-            Error (E ("type constructor " ^ name ^ " " ^ describe_span sp
+            Error (E ("type constructor " ^ name ^ " " ^ Token.describe_span sp
                       ^ " expects " ^ string_of_int arity ^ " argument(s)"))
           else
             let* args' = map_m error_monad (go ctx) args in
@@ -1577,7 +1582,7 @@ let elab (ast : ast) : core m_result =
       | PStrLit c    -> Ok (PStrLit c, t_string)
       | PVar (s, sp) -> (match StringMap.lookup s bindings with
                          | None   -> Error (E ("unexpected variable in pattern: " ^ s
-                                               ^ " " ^ describe_span sp))
+                                               ^ " " ^ Token.describe_span sp))
                          | Some v -> let (Binding (_, _, _, _, ty)) = v in
                                      Ok (PVar v, ty))
       | POpenIn (MModule name, p)
@@ -1632,7 +1637,7 @@ let elab (ast : ast) : core m_result =
     | StrLit s -> Ok (StrLit s, t_string)
     | Var (s, sp) ->
             (match Ctx.lookup s ctx with
-            | None -> Error (E ("variable not in scope: " ^ s ^ " " ^ describe_span sp))
+            | None -> Error (E ("variable not in scope: " ^ s ^ " " ^ Token.describe_span sp))
             | Some v ->
               let (Binding (_, _, _, qvars, ty)) = v in
               let ty = instantiate lvl qvars () ty in
