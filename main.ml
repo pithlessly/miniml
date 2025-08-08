@@ -1236,6 +1236,18 @@ let initial_ctx
       add "trace" [] ((t_unit --> t_string) --> t_unit);
       ()
     ));
+    add_mod "Cont" (mk_ctx (fun add _ add_ty _ _ ->
+      let ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
+      and ty2 name = let c = add_ty name 2 in fun a b -> CTCon (c, a :: b :: [])
+      in
+      let t_prompt = ty1 "prompt" in
+      let t_cont = ty2 "cont" in
+      add "new_prompt" qa (t_unit --> t_prompt a);
+      add "prompt"  qa (t_prompt a --> (t_unit --> a) --> a);
+      add "control" qa (t_prompt a --> (t_cont b a --> a) --> b);
+      add "resume"  qa (t_cont b a --> b --> a);
+      ()
+    ));
     ()
   )
 

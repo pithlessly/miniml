@@ -82,3 +82,43 @@ end = struct
   let absurd (v : void) = match v with _ -> .
 end
 type void = Void.void
+
+module Cont : sig
+  type 'a prompt
+  type ('a, 'b) cont
+  val new_prompt : unit -> 'a prompt
+  val prompt     : 'a prompt -> (unit -> 'a) -> 'a
+  val control    : 'a prompt -> (('b, 'a) cont -> 'a) -> 'b
+  val resume     : ('a, 'b) cont -> 'a -> 'b
+end = struct
+  module Sh = Effect.Shallow
+  type ('a, 'b) cont = ('a, 'b) Sh.continuation
+  type 'a prompt = {
+    prompt  : (unit -> 'a) -> 'a;
+    control : 'b. (('b, 'a) cont -> 'a) -> 'b;
+  }
+  let new_prompt (type a) () =
+    let
+      module M = struct
+        type _ Effect.t +=
+          | Control : (('b, a) cont -> a) -> 'b Effect.t
+        let prompt f =
+          Sh.continue_with (Sh.fiber f) () {
+            retc = (fun x -> x);
+            exnc = raise;
+            effc = (function
+              | Control c -> Some c
+              | _ -> None);
+          }
+        let control h = Effect.perform (Control h)
+      end
+    in
+    { prompt = M.prompt; control = M.control }
+  let prompt p f = p.prompt f
+  let control p h = p.control h
+  let resume k a  = Sh.continue_with k a {
+    retc = (fun x -> x);
+    exnc = raise;
+    effc = (fun _ -> None);
+  }
+end
