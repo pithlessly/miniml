@@ -21,6 +21,8 @@ type token =
   | Arrow
   | KTrue | KFalse
   | KType | KOf
+  | KModule
+  | KStruct | KEnd
   | KLet | KRec | KAnd | KIn
   | KIf | KThen | KElse
   | KMatch | KWith
@@ -132,6 +134,8 @@ let lex str =
         function
         | "true" -> KTrue | "false" -> KFalse
         | "type" -> KType | "of" -> KOf
+        | "module" -> KModule
+        | "struct" -> KStruct | "end" -> KEnd
         | "let" -> KLet | "rec" -> KRec
         | "and" -> KAnd | "in" -> KIn
         | "if" -> KIf | "then" -> KThen | "else" -> KElse
@@ -473,27 +477,36 @@ let parse: token list -> ast m_result =
   in
 
   (* helpers for parsing specific tokens *)
-  let is_rec : bool parser
-             = fun input k -> match input with | KRec  :: input -> k input true
-                                               | _              -> k input false
-  and equal  : unit parser
-             = fun input k -> match input with | Equal :: input -> k input ()
-                                               | _              -> Error (E "expected '='")
-  and arrow  : unit parser
-             = fun input k -> match input with | Arrow :: input -> k input ()
-                                               | _              -> Error (E "expected '->'")
-  and k_in   : unit parser
-             = fun input k -> match input with | KIn   :: input -> k input ()
-                                               | _              -> Error (E "expected 'in'")
-  and k_then : unit parser
-             = fun input k -> match input with | KThen :: input -> k input ()
-                                               | _              -> Error (E "expected 'then'")
-  and k_else : unit parser
-             = fun input k -> match input with | KElse :: input -> k input ()
-                                               | _              -> Error (E "expected 'else'")
-  and k_with : unit parser
-             = fun input k -> match input with | KWith :: input -> k input ()
-                                               | _              -> Error (E "expected 'with'")
+  let is_rec      : bool parser
+                  = fun input k -> match input with | KRec    :: input -> k input true
+                                                    | _                -> k input false
+  and equal       : unit parser
+                  = fun input k -> match input with | Equal   :: input -> k input ()
+                                                    | _                -> Error (E "expected '='")
+  and arrow       : unit parser
+                  = fun input k -> match input with | Arrow   :: input -> k input ()
+                                                    | _                -> Error (E "expected '->'")
+  and k_struct    : unit parser
+                  = fun input k -> match input with | KStruct :: input -> k input ()
+                                                    | _                -> Error (E "expected 'struct'")
+  and k_end       : unit parser
+                  = fun input k -> match input with | KEnd    :: input -> k input ()
+                                                    | _                -> Error (E "expected 'end'")
+  and k_in        : unit parser
+                  = fun input k -> match input with | KIn     :: input -> k input ()
+                                                    | _                -> Error (E "expected 'in'")
+  and k_then      : unit parser
+                  = fun input k -> match input with | KThen   :: input -> k input ()
+                                                    | _                -> Error (E "expected 'then'")
+  and k_else      : unit parser
+                  = fun input k -> match input with | KElse   :: input -> k input ()
+                                                    | _                -> Error (E "expected 'else'")
+  and k_with      : unit parser
+                  = fun input k -> match input with | KWith   :: input -> k input ()
+                                                    | _                -> Error (E "expected 'with'")
+  and ident_upper : (string * span) parser
+                  = fun input k -> match input with | IdentUpper (name, sp) :: input -> k input (name, sp)
+                                                    | _                              -> Error (E "expected uppercase identifier")
   in
 
   (* parsing patterns *)
