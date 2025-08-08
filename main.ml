@@ -2001,47 +2001,53 @@ module Compile = struct
         | PAsc (_, vd) -> Void.absurd vd
         | PWild -> "#t"
       in
-      let rec go_expr : expr -> string =
+      let rec go_expr : expr -> bool * string =
         function
         | Tuple [] ->
-          "'()"
+          (true, "'()")
         | Tuple es ->
-          "(vector " ^ (String.concat " " (List.map go_expr es)) ^ ")"
+          (true, "(vector " ^ (String.concat " " (List.map go_expr_pure es)) ^ ")")
         | List es ->
-          List.fold_right (fun e acc -> "(cons " ^ e ^ " " ^ acc ^ ")")
-            (List.map go_expr es) "'()"
+          (true,
+            List.fold_right (fun e acc -> "(cons " ^ e ^ " " ^ acc ^ ")")
+              (List.map go_expr_pure es) "'()")
         | Con (c, es) ->
           let es = Option.unwrap es in
           let vector_layout () =
-            match es with
-            | [] -> go_cvar c
-            | _ ->
-              "(vector " ^ go_cvar c ^ (String.concat ""
-                (List.map (fun e -> " " ^ go_expr e) es)) ^ ")"
+            (true,
+              match es with
+              | [] -> go_cvar c
+              | _ ->
+                "(vector " ^ go_cvar c ^ (String.concat ""
+                  (List.map (fun e -> " " ^ go_expr_pure e) es)) ^ ")")
           in (
           match c with
           | CBinding (name, _, User, _, _, _) -> vector_layout ()
           | CBinding (name, _, Builtin _, _, _, _) ->
             match (name, es) with
-            | ("true",  []) -> "#t"
-            | ("false", []) -> "#f"
-            | ("None",      []) -> "'()"
-            | ("Some", e :: []) -> "(list " ^ go_expr e ^ ")"
+            | ("true",  []) -> (true, "#t")
+            | ("false", []) -> (true, "#f")
+            | ("None",      []) -> (true, "'()")
+            | ("Some", e :: []) -> (true, "(list " ^ go_expr_pure e ^ ")")
             (* TODO: DupErr could use newtype layout *)
             | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
             | (_, es) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
                                ^ string_of_int (List.length es)))
-        | CharLit c -> go_char c
-        | IntLit i -> go_int i
-        | StrLit s -> go_str s
-        | Var v ->
-          go_var v
+        | CharLit c -> (true, go_char c)
+        | IntLit i -> (true, go_int i)
+        | StrLit s -> (true, go_str s)
+        | Var v -> (true, go_var v)
         | OpenIn (_, _) ->
           invalid_arg "OpenIn should no longer be present in Core.expr"
         | App (e1, e2) ->
-          let e1' = go_expr e1 in
-          let e2' = go_expr e2 in
-          sequence ("(" ^ e1' ^ " " ^ e2' ^ ")")
+          let (p1, e1') = go_expr e1 in
+          let (p2, e2') = go_expr e2 in
+          (false,
+            if p1 || p2 then
+              "(" ^ e1' ^ " " ^ e2' ^ ")"
+            else
+              "(" ^ sequence e1' ^ " " ^ e2' ^ ")"
+          )
         | LetIn (bs, e) ->
           bindings bs;
           go_expr e
@@ -2050,7 +2056,7 @@ module Compile = struct
             let locals = List.concat (List.map (fun (p, _) -> pat_local_vars p) branches) in
             emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals))
           );
-          let scrutinee' = go_expr scrutinee in
+          let scrutinee' = go_expr_impure scrutinee in
           let tv = tmp_var () in
           emit_ln ("(define " ^ tv ^ " (let ((scrutinee " ^ scrutinee' ^ "))");
           indent 2 (fun () ->
@@ -2061,22 +2067,22 @@ module Compile = struct
               last_is_t := (pat' = "#t");
               emit_ln (" (" ^ go_pat pat);
               emit_ln ("  (let ()");
-              indent 4 (fun () -> emit_ln (go_expr e ^ "))"))
+              indent 4 (fun () -> emit_ln (go_expr_impure e ^ "))"))
             ) branches;
             emit_ln (if deref last_is_t then " )))"
                                         else " (else (miniml-match-failure)))))"));
-          tv
+          (true, tv)
         | IfThenElse (e_cond, e_then, e_else) ->
-          let e_cond' = go_expr e_cond in
+          let e_cond' = go_expr_impure e_cond in
           let tv = tmp_var () in
           emit_ln ("(define " ^ tv ^ " (if " ^ e_cond');
           indent 2 (fun () ->
             emit_ln "(let ()";
-            indent 2 (fun () -> emit_ln (go_expr e_then ^ ")"));
+            indent 2 (fun () -> emit_ln (go_expr_impure e_then ^ ")"));
             emit_ln "(let ()";
-            indent 2 (fun () -> emit_ln (go_expr e_else ^ ")))"))
+            indent 2 (fun () -> emit_ln (go_expr_impure e_else ^ ")))"))
           );
-          tv
+          (true, tv)
         | Fun ([], body) ->
           go_expr body
         | Fun (arg :: [], body) ->
@@ -2086,13 +2092,20 @@ module Compile = struct
             let locals = pat_local_vars arg in
             emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
             emit_ln ("(miniml-fun-guard " ^ go_pat arg ^ ")");
-            emit_ln (go_expr body ^ "))")
+            emit_ln (go_expr_impure body ^ "))")
           );
-          tv
+          (true, tv)
         | Fun (arg :: args, body) ->
           go_expr (Fun (arg :: [], Fun (args, body)))
         | Function _ ->
           invalid_arg "Function should no longer be present in Core.expr"
+      and go_expr_pure : expr -> string =
+        fun e ->
+        match go_expr e with
+        | (true, e) -> e
+        | (false, e) -> sequence e
+      and go_expr_impure : expr -> string =
+        fun e -> snd (go_expr e)
       and bindings (Bindings (_, bs)) =
         (* TODO: if the bindings aren't recursive, we can declare all these one binding a time *)
         let locals = List.concat (List.map (fun (p, _, _, _) -> pat_local_vars p) bs) in
@@ -2103,7 +2116,7 @@ module Compile = struct
             let rhs = Fun (args, rhs) in
             emit_ln "(let ((scrutinee (let ()";
             indent 2 (fun () ->
-              indent 6 (fun () -> emit_ln (go_expr rhs ^ ")))"));
+              indent 6 (fun () -> emit_ln (go_expr_impure rhs ^ ")))"));
               emit_ln (go_pat head ^ ")")
             )
           ) bs
