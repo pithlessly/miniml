@@ -1,5 +1,5 @@
 OCAMLC := ocamlopt
-SCHEME_IMPL := chicken
+SCHEME_IMPL := chez
 
 SCHEME_COMMAND_chicken := csi compat_chicken.scm prelude.scm -script
 SCHEME_COMMAND_chez    := echo "(exit)" | scheme -q compat_chez.scm prelude.scm
