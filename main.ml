@@ -255,99 +255,137 @@ type ast_decl     = | Let      of ast_bindings
                     | Module   of (string * span) * ast_decl list
 type ast = ast_decl list
 
-(* parser combinators *)
+module Parser = struct
 
-type 'a associativity =
-  | AssocLeft  of ('a -> 'a -> 'a)
-  | AssocRight of ('a -> 'a -> 'a)
-  | AssocNone  of ('a list -> 'a)
+  (* precedence walker *)
 
-let resolve_precedence (operands: 'a list) (operators: 'o list)
-      (operator_info: 'o -> int * 'a associativity): 'a =
-  (* removes n+1 elements of `xs` and n elements of `opers` *)
-  let rec go prec xs opers =
-    match (xs, opers) with
-    (* no more operators (end of the input) *)
-    | (x :: [], [])         -> (x, [], [])
-    | (x :: xs, o :: opers) ->
-      let (o_prec, assoc) = operator_info o in
-      if o_prec < prec then
-        (x, xs, o :: opers)
-      else (
-        match assoc with
-        | AssocLeft f ->
-          let (rhs, xs, opers) = go (o_prec + 1) xs opers in
-          go prec (f x rhs :: xs) opers
-        | AssocRight f ->
-          let (rhs, xs, opers) = go o_prec xs opers in
-          go prec (f x rhs :: xs) opers
-        | AssocNone f ->
-          (* removes n+1 elements of `xs` and n elements of `opers` *)
-          let rec walk_nary acc xs opers =
-            let (x, xs, opers) = go (o_prec + 1) xs opers in
-            let acc = x :: acc in
-            match opers with
-            | o' :: opers ->
-              let same_operator =
-                (* We formerly used (=) to check that o and o' were the same.
-                   In the interest of avoiding use of polymorphic comparison,
-                   we instead check that `operator_info o'` has the same
-                   precedence and verify that its associativity is also
-                   AssocNone - we require that the caller doesn't try to
-                   declare two non-associative operators at the same precedence
-                   level *)
-                match operator_info o' with
-                | (o'_prec, AssocNone _) -> o_prec = o'_prec
-                | (o'_prec, _) -> if o_prec = o'_prec then
-                                    invalid_arg "non-associative operators must be in their own precedence level"
-                                  else false
-              in
-              if same_operator then walk_nary acc xs opers
-                               else (acc, xs, o' :: opers)
-            | [] -> (acc, xs, [])
-          in
-          let (args, xs, opers) = walk_nary (x :: []) xs opers in
-          go prec (f (List.rev args) :: xs) opers
-      )
-    | _ -> invalid_arg "input lists weren't the appropriate lengths"
-  in
-  match go 0 operands operators with
-  | (res, [], []) -> res
-  | _ -> invalid_arg "`resolve_precedence` couldn't consume the whole input"
+  type 'a associativity =
+    | AssocLeft  of ('a -> 'a -> 'a)
+    | AssocRight of ('a -> 'a -> 'a)
+    | AssocNone  of ('a list -> 'a)
 
-type 'a parser =
-  token list ->
-  (token list -> 'a -> ast m_result) ->
-  ast m_result
+  let resolve_precedence (operands: 'a list) (operators: 'o list)
+        (operator_info: 'o -> int * 'a associativity): 'a =
+    (* removes n+1 elements of `xs` and n elements of `opers` *)
+    let rec go prec xs opers =
+      match (xs, opers) with
+      (* no more operators (end of the input) *)
+      | (x :: [], [])         -> (x, [], [])
+      | (x :: xs, o :: opers) ->
+        let (o_prec, assoc) = operator_info o in
+        if o_prec < prec then
+          (x, xs, o :: opers)
+        else (
+          match assoc with
+          | AssocLeft f ->
+            let (rhs, xs, opers) = go (o_prec + 1) xs opers in
+            go prec (f x rhs :: xs) opers
+          | AssocRight f ->
+            let (rhs, xs, opers) = go o_prec xs opers in
+            go prec (f x rhs :: xs) opers
+          | AssocNone f ->
+            (* removes n+1 elements of `xs` and n elements of `opers` *)
+            let rec walk_nary acc xs opers =
+              let (x, xs, opers) = go (o_prec + 1) xs opers in
+              let acc = x :: acc in
+              match opers with
+              | o' :: opers ->
+                let same_operator =
+                  (* We formerly used (=) to check that o and o' were the same.
+                     In the interest of avoiding use of polymorphic comparison,
+                     we instead check that `operator_info o'` has the same
+                     precedence and verify that its associativity is also
+                     AssocNone - we require that the caller doesn't try to
+                     declare two non-associative operators at the same precedence
+                     level *)
+                  match operator_info o' with
+                  | (o'_prec, AssocNone _) -> o_prec = o'_prec
+                  | (o'_prec, _) -> if o_prec = o'_prec then
+                                      invalid_arg "non-associative operators must be in their own precedence level"
+                                    else false
+                in
+                if same_operator then walk_nary acc xs opers
+                                 else (acc, xs, o' :: opers)
+              | [] -> (acc, xs, [])
+            in
+            let (args, xs, opers) = walk_nary (x :: []) xs opers in
+            go prec (f (List.rev args) :: xs) opers
+        )
+      | _ -> invalid_arg "input lists weren't the appropriate lengths"
+    in
+    match go 0 operands operators with
+    | (res, [], []) -> res
+    | _ -> invalid_arg "`resolve_precedence` couldn't consume the whole input"
 
-let pure x = fun input k -> k input x
+  (* parser combinators *)
 
-type ('f, 'g, 'a) chain =
-  | Chain of ('g -> 'a) parser * 'f
+  type 'a parser =
+    token list ->
+    (token list -> 'a -> ast m_result) ->
+    ast m_result
 
-(* basic combinators *)
-let (@>) p1 (Chain (p2, f)) = let p3 = fun input k ->
-                                p1 input (fun input x ->
-                                  p2 input (fun input g ->
-                                    k input (fun g' -> g (g' x))))
-                              in Chain (p3, f)
-let fin f: ('f, 'a, 'a) chain = Chain (pure Fun.id, f)
-let seq (Chain (p, f): ('f, 'f, 'a) chain): 'a parser =
-  fun input k -> p input (fun input a_of_f -> k input (a_of_f f))
-let force (e: string) (p: 'a option parser): 'a parser =
-  fun input k -> p input (fun input opt -> match opt with | Some x -> k input x
-                                                          | None -> Error (E e))
-let many (p: 'a option parser): 'a list parser =
-  fun input k ->
-    let rec go input acc = p input (fun input opt ->
-                                    match opt with
-                                    | Some x -> go input (x :: acc)
-                                    | None -> k input (List.rev acc))
-    in go input []
-let dummy tok input = tok :: input
+  let pure x = fun input k -> k input x
 
-let parse: token list -> ast m_result =
+  type ('f, 'g, 'a) chain =
+    | Chain of ('g -> 'a) parser * 'f
+
+  let (@>) p1 (Chain (p2, f)) = let p3 = fun input k ->
+                                  p1 input (fun input x ->
+                                    p2 input (fun input g ->
+                                      k input (fun g' -> g (g' x))))
+                                in Chain (p3, f)
+
+  let fin f: ('f, 'a, 'a) chain = Chain (pure Fun.id, f)
+  let seq (Chain (p, f): ('f, 'f, 'a) chain): 'a parser =
+    fun input k -> p input (fun input a_of_f -> k input (a_of_f f))
+  let force (e: string) (p: 'a option parser): 'a parser =
+    fun input k -> p input (fun input opt -> match opt with | Some x -> k input x
+                                                            | None -> Error (E e))
+  let many (p: 'a option parser): 'a list parser =
+    fun input k ->
+      let rec go input acc = p input (fun input opt ->
+                                      match opt with
+                                      | Some x -> go input (x :: acc)
+                                      | None -> k input (List.rev acc))
+      in go input []
+  (* append an artificial token to the input *)
+  let dummy tok input = tok :: input
+
+  (* helpers for parsing specific tokens *)
+
+  let is_rec      : bool parser
+                  = fun input k -> match input with | KRec    :: input -> k input true
+                                                    | _                -> k input false
+  and equal       : unit parser
+                  = fun input k -> match input with | Equal   :: input -> k input ()
+                                                    | _                -> Error (E "expected '='")
+  and arrow       : unit parser
+                  = fun input k -> match input with | Arrow   :: input -> k input ()
+                                                    | _                -> Error (E "expected '->'")
+  and k_struct    : unit parser
+                  = fun input k -> match input with | KStruct :: input -> k input ()
+                                                    | _                -> Error (E "expected 'struct'")
+  and k_end       : unit parser
+                  = fun input k -> match input with | KEnd    :: input -> k input ()
+                                                    | _                -> Error (E "expected 'end'")
+  and k_in        : unit parser
+                  = fun input k -> match input with | KIn     :: input -> k input ()
+                                                    | _                -> Error (E "expected 'in'")
+  and k_then      : unit parser
+                  = fun input k -> match input with | KThen   :: input -> k input ()
+                                                    | _                -> Error (E "expected 'then'")
+  and k_else      : unit parser
+                  = fun input k -> match input with | KElse   :: input -> k input ()
+                                                    | _                -> Error (E "expected 'else'")
+  and k_with      : unit parser
+                  = fun input k -> match input with | KWith   :: input -> k input ()
+                                                    | _                -> Error (E "expected 'with'")
+  and ident_upper : (string * span) parser
+                  = fun input k -> match input with | IdentUpper (name, sp) :: input -> k input (name, sp)
+                                                    | _                              -> Error (E "expected uppercase identifier")
+
   (* parsing types *)
+
   let ty_params: string list parser =
     fun input k ->
     match input with
@@ -361,12 +399,11 @@ let parse: token list -> ast m_result =
       in go input (v1 :: [])
     | OpenParen :: _ -> Error (E "expected type parameters")
     | _ -> k input []
-  in
   let ty_name: string parser =
     (* TODO: care about spans of type names *)
     fun input k -> match input with | IdentLower (s, _) :: Equal :: input -> k input s
                                     | _ -> Error (E "expected type name")
-  in
+
   let rec ty_atomic: ast_typ parser =
     let rec ty_base input k =
       match input with
@@ -432,7 +469,6 @@ let parse: token list -> ast m_result =
              | _    -> invalid_arg "should be impossible")
         in k input ty_expr)
     in go input [] []
-  in
   let ty_decl: (string list * string * ast_typ_decl) option parser =
     fun input k ->
     match input with
@@ -469,49 +505,16 @@ let parse: token list -> ast m_result =
       in
       p' input k
     | _ -> k input None
-  in
+  (* an optional type annotation *)
   let ty_annot: ast_typ option parser =
     fun input k ->
     match input with
     | Colon :: input ->
       ty input (fun input typ -> k input (Some typ))
     | _ -> k input None
-  in
-
-  (* helpers for parsing specific tokens *)
-  let is_rec      : bool parser
-                  = fun input k -> match input with | KRec    :: input -> k input true
-                                                    | _                -> k input false
-  and equal       : unit parser
-                  = fun input k -> match input with | Equal   :: input -> k input ()
-                                                    | _                -> Error (E "expected '='")
-  and arrow       : unit parser
-                  = fun input k -> match input with | Arrow   :: input -> k input ()
-                                                    | _                -> Error (E "expected '->'")
-  and k_struct    : unit parser
-                  = fun input k -> match input with | KStruct :: input -> k input ()
-                                                    | _                -> Error (E "expected 'struct'")
-  and k_end       : unit parser
-                  = fun input k -> match input with | KEnd    :: input -> k input ()
-                                                    | _                -> Error (E "expected 'end'")
-  and k_in        : unit parser
-                  = fun input k -> match input with | KIn     :: input -> k input ()
-                                                    | _                -> Error (E "expected 'in'")
-  and k_then      : unit parser
-                  = fun input k -> match input with | KThen   :: input -> k input ()
-                                                    | _                -> Error (E "expected 'then'")
-  and k_else      : unit parser
-                  = fun input k -> match input with | KElse   :: input -> k input ()
-                                                    | _                -> Error (E "expected 'else'")
-  and k_with      : unit parser
-                  = fun input k -> match input with | KWith   :: input -> k input ()
-                                                    | _                -> Error (E "expected 'with'")
-  and ident_upper : (string * span) parser
-                  = fun input k -> match input with | IdentUpper (name, sp) :: input -> k input (name, sp)
-                                                    | _                              -> Error (E "expected uppercase identifier")
-  in
 
   (* parsing patterns *)
+
   let rec pattern3 : ast_pat option parser = fun input k ->
     match input with
     | KTrue        :: input -> k input (Some (PCon ("true", None)))
@@ -608,9 +611,9 @@ let parse: token list -> ast m_result =
               | Some ty -> PAsc (pat, ty)
     in
     k input pat)))
-  in
 
   (* parsing expressions *)
+
   let rec expr0 : ast_expr option parser = fun input k ->
     expr0' expr1 input k
   and expr0' fallback : ast_expr option parser = fun input k ->
@@ -814,7 +817,8 @@ let parse: token list -> ast m_result =
     is_rec input (fun input is_rec ->
     many val_binding (dummy KAnd input) (fun input bindings ->
     k input (Bindings (is_rec, bindings))))
-  in
+
+  (* declarations *)
 
   let rec decls input k =
     many (fun input k ->
@@ -840,12 +844,14 @@ let parse: token list -> ast m_result =
       fin (fun ident () () decls () ->
         (ident, decls)))
     in p input k
-  in
 
-  fun tokens ->
-  decls tokens (fun remaining ds ->
-  match remaining with | [] -> Ok ds
-                       | _ -> Error (E "unexpected tokens at EOF"))
+  let parse: token list -> ast m_result =
+    fun tokens ->
+    decls tokens (fun remaining ds ->
+    match remaining with | [] -> Ok ds
+                         | _ -> Error (E "unexpected tokens at EOF"))
+
+end
 
 type core_level = int
 type core_var_id = int
@@ -2082,6 +2088,6 @@ let text =
 
 let () =
   Miniml.trace (fun () -> "Log level: " ^ string_of_int Miniml.log_level);
-  match elab =<< (parse =<< Lex.lex text) with
+  match elab =<< (Parser.parse =<< Lex.lex text) with
   | Ok core     -> print_endline (compile Scheme core)
   | Error (E e) -> (prerr_endline ("Error: " ^ e); exit 1)
