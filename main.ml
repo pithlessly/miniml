@@ -7,7 +7,6 @@ module Token = struct
   let describe_span (LineNo n) =
     if n = 0 - 1 then "(dummy)"
     else "(near line " ^ string_of_int n ^ ")"
-
   type token =
     | OpenParen
     | CloseParen
@@ -170,102 +169,104 @@ module Lex = struct
     go 0 []
 end
 
-type mod_expr = | MModule of string
-type ('var, 'con, 'ty) pat =
-                               | POr      of ('var, 'con, 'ty) pat
-                                           * ('var, 'con, 'ty) pat
-                               | PTuple   of ('var, 'con, 'ty) pat list
-                               | PList    of ('var, 'con, 'ty) pat list
-                               | PCon     of 'con
-                                           * ('var, 'con, 'ty) pat list option
-                               | PCharLit of char
-                               | PIntLit  of int
-                               | PStrLit  of string
-                               | PVar     of 'var
-                               | POpenIn  of mod_expr
-                                           * ('var, 'con, 'ty) pat
-                               | PAsc     of ('var, 'con, 'ty) pat * 'ty
-                               | PWild
-type ('var, 'con, 'ty) binding = ('var, 'con, 'ty) pat      (* head pattern *)
-                               * ('var, 'con, 'ty) pat list (* argument patterns *)
-                               * 'ty option                 (* return type annotation *)
-                               * ('var, 'con, 'ty) expr     (* RHS *)
-and  ('var, 'con, 'ty) bindings =
-                               | Bindings of bool (* recursive? *)
-                                           * ('var, 'con, 'ty) binding list
-and  ('var, 'con, 'ty) expr =
-                               | Tuple      of ('var, 'con, 'ty) expr list
-                               | List       of ('var, 'con, 'ty) expr list
-                               | Con        of 'con
-                                             * ('var, 'con, 'ty) expr list option
-                               | CharLit    of char
-                               | IntLit     of int
-                               | StrLit     of string
-                               | Var        of 'var
-                               | OpenIn     of mod_expr
-                                             * ('var, 'con, 'ty) expr
-                               | App        of ('var, 'con, 'ty) expr
-                                             * ('var, 'con, 'ty) expr
-                               | LetIn      of ('var, 'con, 'ty) bindings
-                                             * ('var, 'con, 'ty) expr
-                               | Match      of ('var, 'con, 'ty) expr
-                                             * ( ('var, 'con, 'ty) pat
+module CommonSyntax = struct
+  type mod_expr = | MModule of string
+  type ('var, 'con, 'ty) pat =
+                                 | POr      of ('var, 'con, 'ty) pat
+                                             * ('var, 'con, 'ty) pat
+                                 | PTuple   of ('var, 'con, 'ty) pat list
+                                 | PList    of ('var, 'con, 'ty) pat list
+                                 | PCon     of 'con
+                                             * ('var, 'con, 'ty) pat list option
+                                 | PCharLit of char
+                                 | PIntLit  of int
+                                 | PStrLit  of string
+                                 | PVar     of 'var
+                                 | POpenIn  of mod_expr
+                                             * ('var, 'con, 'ty) pat
+                                 | PAsc     of ('var, 'con, 'ty) pat * 'ty
+                                 | PWild
+  type ('var, 'con, 'ty) binding = ('var, 'con, 'ty) pat      (* head pattern *)
+                                 * ('var, 'con, 'ty) pat list (* argument patterns *)
+                                 * 'ty option                 (* return type annotation *)
+                                 * ('var, 'con, 'ty) expr     (* RHS *)
+  and  ('var, 'con, 'ty) bindings =
+                                 | Bindings of bool (* recursive? *)
+                                             * ('var, 'con, 'ty) binding list
+  and  ('var, 'con, 'ty) expr =
+                                 | Tuple      of ('var, 'con, 'ty) expr list
+                                 | List       of ('var, 'con, 'ty) expr list
+                                 | Con        of 'con
+                                               * ('var, 'con, 'ty) expr list option
+                                 | CharLit    of char
+                                 | IntLit     of int
+                                 | StrLit     of string
+                                 | Var        of 'var
+                                 | OpenIn     of mod_expr
                                                * ('var, 'con, 'ty) expr
-                                               ) list
-                               | IfThenElse of ('var, 'con, 'ty) expr
-                                             * ('var, 'con, 'ty) expr
-                                             * ('var, 'con, 'ty) expr
-                               | Fun        of ('var, 'con, 'ty) pat list
-                                             * ('var, 'con, 'ty) expr
-                               | Function   of ( ('var, 'con, 'ty) pat
+                                 | App        of ('var, 'con, 'ty) expr
                                                * ('var, 'con, 'ty) expr
-                                               ) list
-
-let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
-  (* TODO: the real value restriction is smarter *)
-  let rec go_expr =
-    function
-    | Tuple es
-    | List es
-    | Con (_, Some es) -> List.fold_left (fun acc e -> acc || go_expr e) false es
-    | Con (_, None)
-    | CharLit _
-    | IntLit _
-    | StrLit _
-    | Var _
-    | Fun (_, _) -> false
-    | Function _ -> false
-    | LetIn (Bindings (_, bs), e) ->
-      List.fold_left (fun acc b -> acc || go b) false bs
-      || go_expr e
-    | _ -> true
-  and go (_, args, _, e) = match args with
-                           | _ :: _ -> false
-                           | []     -> go_expr e
-  in go
+                                 | LetIn      of ('var, 'con, 'ty) bindings
+                                               * ('var, 'con, 'ty) expr
+                                 | Match      of ('var, 'con, 'ty) expr
+                                               * ( ('var, 'con, 'ty) pat
+                                                 * ('var, 'con, 'ty) expr
+                                                 ) list
+                                 | IfThenElse of ('var, 'con, 'ty) expr
+                                               * ('var, 'con, 'ty) expr
+                                               * ('var, 'con, 'ty) expr
+                                 | Fun        of ('var, 'con, 'ty) pat list
+                                               * ('var, 'con, 'ty) expr
+                                 | Function   of ( ('var, 'con, 'ty) pat
+                                                 * ('var, 'con, 'ty) expr
+                                                 ) list
+  let could_have_side_effects : ('var, 'con, 'ty) binding -> bool =
+    (* TODO: the real value restriction is smarter *)
+    let rec go_expr =
+      function
+      | Tuple es
+      | List es
+      | Con (_, Some es) -> List.fold_left (fun acc e -> acc || go_expr e) false es
+      | Con (_, None)
+      | CharLit _
+      | IntLit _
+      | StrLit _
+      | Var _
+      | Fun (_, _) -> false
+      | Function _ -> false
+      | LetIn (Bindings (_, bs), e) ->
+        List.fold_left (fun acc b -> acc || go b) false bs
+        || go_expr e
+      | _ -> true
+    and go (_, args, _, e) = match args with
+                             | _ :: _ -> false
+                             | []     -> go_expr e
+    in go
+end
 
 module Ast = struct
-  type ast_typ = | TVar of string * Token.span
-                 | TCon of mod_expr list * string * Token.span * ast_typ list
-  type ast_pat      = (string * Token.span, string, ast_typ) pat
-  type ast_binding  = (string * Token.span, string, ast_typ) binding
-  type ast_bindings = (string * Token.span, string, ast_typ) bindings
-  type ast_expr     = (string * Token.span, string, ast_typ) expr
-  type ast_typ_decl = | Datatype of (string * ast_typ list) list
-                      | Alias    of ast_typ
-  type ast_decl     = | Let      of ast_bindings
-                      | Types    of ( string list
-                                    * string
-                                    * ast_typ_decl
-                                    ) list
-                      | Module   of (string * Token.span) * ast_decl list
-                      | Open     of (string * Token.span)
-  type ast = ast_decl list
+  type typ = | TVar of string * Token.span
+             | TCon of CommonSyntax.mod_expr list * string * Token.span * typ list
+  type pat      = (string * Token.span, string, typ) CommonSyntax.pat
+  type binding  = (string * Token.span, string, typ) CommonSyntax.binding
+  type bindings = (string * Token.span, string, typ) CommonSyntax.bindings
+  type expr     = (string * Token.span, string, typ) CommonSyntax.expr
+  type typ_decl = | Datatype of (string * typ list) list
+                  | Alias    of typ
+  type decl     = | Let      of bindings
+                  | Types    of ( string list
+                                * string
+                                * typ_decl
+                                ) list
+                  | Module   of (string * Token.span) * decl list
+                  | Open     of (string * Token.span)
+  type ast = decl list
 end
 
 module Parser = struct
 
   open Token
+  open CommonSyntax
   open Ast
 
   (* precedence walker *)
@@ -415,7 +416,7 @@ module Parser = struct
     fun input k -> match input with | IdentLower (s, _) :: Equal :: input -> k input s
                                     | _ -> Error (E "expected type name")
 
-  let rec ty_atomic: ast_typ parser =
+  let rec ty_atomic: typ parser =
     let rec ty_base input k =
       match input with
       | IdentQuote (v, sp) :: input -> k input (TVar (v, sp) :: [])
@@ -455,7 +456,7 @@ module Parser = struct
                 | t :: [] -> k input t
                 | _ -> Error (E "you may have been trying to use Haskell tuple syntax"))
     in ty_base input go
-  and ty: ast_typ parser =
+  and ty: typ parser =
     fun input k ->
     (* TODO: migrate to use 'many', which is used for binary operators
        in parsing patterns, expressions, etc. *)
@@ -470,7 +471,7 @@ module Parser = struct
       | IdentSymbol (op, sp) :: _ ->
         Error (E ("invalid type operator: " ^ op ^ " " ^ describe_span sp))
       | _ ->
-        let ty_expr: ast_typ =
+        let ty_expr: typ =
           resolve_precedence
             (List.rev ty_operands)
             (List.rev ty_operators)
@@ -480,7 +481,7 @@ module Parser = struct
              | _    -> invalid_arg "should be impossible")
         in k input ty_expr)
     in go input [] []
-  let ty_decl: (string list * string * ast_typ_decl) option parser =
+  let ty_decl: (string list * string * typ_decl) option parser =
     fun input k ->
     match input with
     | KAnd :: input ->
@@ -517,7 +518,7 @@ module Parser = struct
       p' input k
     | _ -> k input None
   (* an optional type annotation *)
-  let ty_annot: ast_typ option parser =
+  let ty_annot: typ option parser =
     fun input k ->
     match input with
     | Colon :: input ->
@@ -526,13 +527,13 @@ module Parser = struct
 
   (* parsing patterns *)
 
-  let rec pattern3 : ast_pat option parser = fun input k ->
+  let rec pattern3 : pat option parser = fun input k ->
     match input with
     | KTrue        :: input -> k input (Some (PCon ("true", None)))
     | KFalse       :: input -> k input (Some (PCon ("false", None)))
-    | IdentUpper (mod_name, _) :: Dot
+    | IdentUpper (mod_name, sp) :: Dot
                    :: input -> (* See NOTE "OpenIn" *)
-                               force "expected pattern" pattern3 input (fun input sub_pat ->
+                               force ("expected pattern " ^ describe_span sp) pattern3 input (fun input sub_pat ->
                                k input (Some (POpenIn (MModule mod_name, sub_pat))))
     | TkCharLit c  :: input -> k input (Some (PCharLit c))
     | TkIntLit i   :: input -> k input (Some (PIntLit i))
@@ -554,7 +555,7 @@ module Parser = struct
                                | CloseParen :: input -> k input (Some e)
                                | _ -> Error (E "expected ')'"))
     | _                     -> k input None
-  and pattern2 : ast_pat option parser = fun input k ->
+  and pattern2 : pat option parser = fun input k ->
     match (input, (match input with
                    | IdentUpper (_, _) :: Dot :: _ -> false
                    | IdentUpper (_, _)        :: _ -> true
@@ -571,13 +572,13 @@ module Parser = struct
       ))
     (* application isn't a pattern, so we don't have to worry about it :) *)
     | _ -> pattern3 input k
-  and pattern1 : ast_pat option parser = fun input k ->
+  and pattern1 : pat option parser = fun input k ->
     pattern2 input (fun input first_operand_opt ->
     match first_operand_opt with
     | None -> k input None
     | Some first_operand ->
       (* parse a pattern operator and its RHS operand *)
-      let next_operand: (string * ast_pat) option parser = fun input k ->
+      let next_operand: (string * pat) option parser = fun input k ->
         let continue input s =
           force "expected pattern" pattern2 input (fun input operand ->
           k input (Some (s, operand)))
@@ -589,7 +590,7 @@ module Parser = struct
                                                       ^ " " ^ describe_span sp))
         | _                              -> k input None
       in
-      many next_operand input (fun input (operands: (string * ast_pat) list) ->
+      many next_operand input (fun input (operands: (string * pat) list) ->
       let operators = List.map fst operands in
       let operands = first_operand :: List.map snd operands in
       let result = resolve_precedence operands operators (
@@ -599,18 +600,18 @@ module Parser = struct
         | _    -> invalid_arg "impossible operator")
       in
       k input (Some result)))
-  and pattern0 : ast_pat parser = fun input k ->
+  and pattern0 : pat parser = fun input k ->
     (* first operand *)
     force "expected pattern" pattern1 input (fun input first_operand ->
     (* additional operands *)
-    let next_operand: ast_pat option parser = fun input k ->
+    let next_operand: pat option parser = fun input k ->
       match input with
       | Comma :: input ->
         force "expected pattern" pattern1 input (fun input operand ->
         k input (Some operand))
       | _ -> k input None
     in
-    many next_operand input (fun input (operands: ast_pat list) ->
+    many next_operand input (fun input (operands: pat list) ->
     let pat = match first_operand :: operands with
               | single :: [] -> single
               | many         -> PTuple many
@@ -625,9 +626,9 @@ module Parser = struct
 
   (* parsing expressions *)
 
-  let rec expr0 : ast_expr option parser = fun input k ->
+  let rec expr0 : expr option parser = fun input k ->
     expr0' expr1 input k
-  and expr0' fallback : ast_expr option parser = fun input k ->
+  and expr0' fallback : expr option parser = fun input k ->
     match input with
     | KLet :: IdentSymbol (s, sp) :: input ->
       (* FIXME: span is slightly wrong *)
@@ -688,7 +689,7 @@ module Parser = struct
     | KFunction :: input ->
       many branch input (fun input branches -> k input (Some (Function branches)))
     | _ -> fallback input k
-  and branch : (ast_pat * ast_expr) option parser = fun input k ->
+  and branch : (pat * expr) option parser = fun input k ->
     match input with
     | Pipe :: input ->
       let p' =
@@ -704,7 +705,7 @@ module Parser = struct
     | None -> k input None
     | Some first_operand ->
       (* parse an operator and its RHS operand *)
-      let next_operand: ((string * span) * ast_expr) option parser =
+      let next_operand: ((string * span) * expr) option parser =
         fun input k ->
         let continue input s_and_sp =
           force "expected expression" (expr0' expr2) input (fun input operand ->
@@ -719,7 +720,7 @@ module Parser = struct
         | Semicolon           :: input -> continue input (";", dummy_span)
         | _                            -> k input None
       in
-      many next_operand input (fun input (operands: ((string * span) * ast_expr) list) ->
+      many next_operand input (fun input (operands: ((string * span) * expr) list) ->
       let operators = List.map fst operands in
       let operands = first_operand :: List.map snd operands in
       let result = resolve_precedence operands operators
@@ -812,7 +813,7 @@ module Parser = struct
       | _ -> Error (E "expected ')'"))
     | _ -> k input None
   and force_expr input k = force "Expected expression" expr0 input k
-  and val_binding : ast_binding option parser = fun input k ->
+  and val_binding : binding option parser = fun input k ->
     match input with
     | KAnd :: input ->
       let p' =
@@ -824,7 +825,7 @@ module Parser = struct
         fin (fun head_pat arg_pats annot () rhs -> Some (head_pat, arg_pats, annot, rhs)))
       in p' input k
     | _ -> k input None
-  and val_bindings : ast_bindings parser = fun input k ->
+  and val_bindings : bindings parser = fun input k ->
     is_rec input (fun input is_rec ->
     many val_binding (dummy KAnd input) (fun input bindings ->
     k input (Bindings (is_rec, bindings))))
@@ -867,41 +868,43 @@ module Parser = struct
 
 end
 
-type core_level = int
-type core_var_id = int
-type core_qvar = | QVar of string * core_var_id
-type core_con_id = int
-type core_con  = | CCon of string * core_con_id
-type core_type = | CQVar of core_qvar
-                 | CUVar of core_uvar ref
-                 | CTCon of core_con * core_type list
-and  core_uvar = | Unknown of string * core_var_id * core_level
-                 | Known   of core_type
-and  core_prov = | User
-                 | Builtin of string (* module prefix *)
-(* ordinary variable binding *)
-type core_var  = | Binding of string (* name in the syntax *)
-                            * core_var_id (* numeric ID *)
-                            * core_prov   (* user-defined or builtin? *)
-                            * core_qvar list (* forall parameters *)
-                            * core_type (* type *)
-(* constructor variable binding *)
-type core_cvar = | CBinding of string (* name in the syntax *)
-                             * core_var_id (* numeric ID *)
-                             * core_prov   (* user-defined or builtin? *)
-                             * core_qvar list (* forall parameters *)
-                             * core_type list (* parameter types *)
-                             * core_type      (* return type *)
+module Core = struct
+  type level = int
+  type var_id = int
+  type qvar = | QVar of string * var_id
+  type con_id = int
+  type con  = | CCon of string * con_id
+  type typ  = | CQVar of qvar
+              | CUVar of uvar ref
+              | CTCon of con * typ list
+  and  uvar = | Unknown of string * var_id * level
+              | Known   of typ
+  and  prov = | User
+              | Builtin of string (* module prefix *)
+  (* ordinary variable binding *)
+  type var  = | Binding of string    (* name in the syntax *)
+                         * var_id    (* numeric ID *)
+                         * prov      (* user-defined or builtin? *)
+                         * qvar list (* forall parameters *)
+                         * typ       (* type *)
+  (* constructor variable binding *)
+  type cvar = | CBinding of string    (* name in the syntax *)
+                          * var_id    (* numeric ID *)
+                          * prov      (* user-defined or builtin? *)
+                          * qvar list (* forall parameters *)
+                          * typ list  (* parameter types *)
+                          * typ       (* return type *)
 
-type core_pat      = (core_var, core_cvar, void) pat
-type core_binding  = (core_var, core_cvar, void) binding
-type core_bindings = (core_var, core_cvar, void) bindings
-type core_expr     = (core_var, core_cvar, void) expr
-type core_tydecl = | CDatatype of core_con * int (* arity *)
-                   | CAlias    of core_con * int (* name and arity *)
-                                * core_qvar list (* parameters *)
-                                * core_type      (* definition *)
-type core = core_bindings list
+  type pat      = (var, cvar, void) CommonSyntax.pat
+  type binding  = (var, cvar, void) CommonSyntax.binding
+  type bindings = (var, cvar, void) CommonSyntax.bindings
+  type expr     = (var, cvar, void) CommonSyntax.expr
+  type tydecl = | CDatatype of con * int (* arity *)
+                | CAlias    of con * int (* name and arity *)
+                             * qvar list (* parameters *)
+                             * typ       (* definition *)
+  type core = bindings list
+end
 
 (* some helpers *)
 let map_m
@@ -950,9 +953,9 @@ let counter () =
 
 module Ctx = struct
   type module_ = | CModule of string * layer
-  and  layer =    core_var list
-             *   core_cvar list
-             * core_tydecl list
+  and  layer =    Core.var list
+             *   Core.cvar list
+             * Core.tydecl list
              *     module_ list
   type t = | Ctx of layer * t option
   let empty_layer : layer = ([], [], [], [])
@@ -964,13 +967,13 @@ module Ctx = struct
         | None   -> match parent with | None -> None
                                       | Some p -> go p
       in go
-  let lookup     : string -> t ->    core_var option = find (fun (vars, _, _, _) -> vars)
-                                                            (fun (Binding (name, _, _, _, _)) -> name)
-  let lookup_con : string -> t ->   core_cvar option = find (fun (_, cvars, _, _) -> cvars)
-                                                            (fun (CBinding (name, _, _, _, _, _)) -> name)
-  let lookup_ty  : string -> t -> core_tydecl option = find (fun (_, _, cons, _) -> cons)
-                                                            (fun (CDatatype (CCon (name, _), _) |
-                                                                  CAlias    (CCon (name, _), _, _, _)) -> name)
+  let lookup     : string -> t ->    Core.var option = find (fun (vars, _, _, _) -> vars)
+                                                            (fun Core.(Binding (name, _, _, _, _)) -> name)
+  let lookup_con : string -> t ->   Core.cvar option = find (fun (_, cvars, _, _) -> cvars)
+                                                            (fun Core.(CBinding (name, _, _, _, _, _)) -> name)
+  let lookup_ty  : string -> t -> Core.tydecl option = find (fun (_, _, cons, _) -> cons)
+                                                            (fun Core.(CDatatype (CCon (name, _), _) |
+                                                                       CAlias    (CCon (name, _), _, _, _)) -> name)
   let lookup_mod : string -> t ->     module_ option = find (fun (_, _, _, modules) -> modules)
                                                             (fun (CModule (name, _)) -> name)
 
@@ -999,9 +1002,10 @@ end
 
 module Elab = struct
 
-  open Ast
+  open CommonSyntax
+  open Core
 
-  let show_ty : core_type -> string =
+  let show_ty : typ -> string =
     let rec go prec ty =
       let wrap_if thresh f =
         if prec <= thresh then f else
@@ -1031,11 +1035,11 @@ module Elab = struct
                               (") " :: con :: acc))
     in fun ty -> String.concat "" (go 0 ty [])
 
-  type tvs = | TyvarScope of (string -> core_type option)
+  type tvs = | TyvarScope of (string -> typ option)
   let tvs_lookup (TyvarScope f) s = f s
-  let tvs_from_map (m : core_type StringMap.t) =
+  let tvs_from_map (m : typ StringMap.t) =
     TyvarScope (fun s -> StringMap.lookup s m)
-  let tvs_new_dynamic (new_ty : string -> core_type) () =
+  let tvs_new_dynamic (new_ty : string -> typ) () =
     let cache = ref StringMap.empty in
     TyvarScope (fun s ->
       match StringMap.lookup s (deref cache) with
@@ -1045,7 +1049,7 @@ module Elab = struct
         cache := Option.unwrap (StringMap.insert s ty (deref cache));
         Some ty)
 
-  let rec occurs_check (v : core_uvar ref) : core_type -> unit m_result =
+  let rec occurs_check (v : uvar ref) : typ -> unit m_result =
     function
     | CQVar _ -> Ok ()
     | CTCon (_, tys) ->
@@ -1069,8 +1073,8 @@ module Elab = struct
           )
 
   (* follow `Known`s until we get where we wanted *)
-  let ground : core_type -> core_type =
-    let rec go ty (obligations : core_uvar ref list) =
+  let ground : typ -> typ =
+    let rec go ty (obligations : uvar ref list) =
       match ty with
       | CUVar r -> (
           match deref r with
@@ -1085,7 +1089,7 @@ module Elab = struct
       List.iter (fun r -> r := Known ty) obligations;
       ty
 
-  let rec unify : core_type -> core_type -> unit m_result = fun t1 t2 ->
+  let rec unify : typ -> typ -> unit m_result = fun t1 t2 ->
     (* FIXME: avoid physical equality on types? *)
     if t1 == t2 then Ok () else
     match (ground t1, ground t2) with
@@ -1108,15 +1112,15 @@ module Elab = struct
       if id1 <> id2 then
         Error (E ("cannot unify different type constructors: " ^ n1 ^ " != " ^ n2))
       else unify_all p1 p2
-  and unify_all : core_type list -> core_type list -> unit m_result = fun ts1 ts2 ->
+  and unify_all : typ list -> typ list -> unit m_result = fun ts1 ts2 ->
     match (ts1, ts2) with
     | ([], []) -> Ok ()
     | (t1 :: ts1, t2 :: ts2) -> let* () = unify t1 t2 in unify_all ts1 ts2
     | _ -> Error (E "cannot unify different numbers of arguments")
 
   let initial_ctx
-    (next_var_id : unit -> core_var_id)
-    (next_con_id : unit -> core_con_id)
+    (next_var_id : unit -> var_id)
+    (next_con_id : unit -> con_id)
   =
     (* it's okay to reuse QVars for multiple variables here -
        they have the same ID, but this is only used to distinguish
@@ -1288,9 +1292,9 @@ module Elab = struct
     )
 
   let preprocess_constructor_args
-    (instantiate : core_qvar list -> unit -> core_type -> core_type)
+    (instantiate : qvar list -> unit -> typ -> typ)
     (mk_tuple : 'a list -> 'a) ctx name (args : 'a list option)
-    : (core_cvar * core_type list * core_type * 'a list) m_result =
+    : (cvar * typ list * typ * 'a list) m_result =
     let* cv =
       match Ctx.lookup_con name ctx with
       | None    -> Error (E ("constructor not in scope: " ^ name))
@@ -1318,7 +1322,7 @@ module Elab = struct
     in
     Ok (cv, param_tys, result_ty, args)
 
-  let elab (ast : ast) : core m_result =
+  let elab (ast : Ast.ast) : core m_result =
     let next_var_id = counter ()
     and next_uvar_name = counter ()
     and next_con_id = counter ()
@@ -1346,7 +1350,7 @@ module Elab = struct
     and t_string = ty0 "string"
     and t_bool   = ty0 "bool"
     in
-    let new_uvar lvl name () : core_type =
+    let new_uvar lvl name () : typ =
       let id = next_uvar_name () in
       let name = match name with
                  | Some n -> n
@@ -1354,12 +1358,12 @@ module Elab = struct
                  | None   -> string_of_int id
       in CUVar (ref (Unknown (name, id, lvl)))
     in
-    let anon_var ty () : core_var =
+    let anon_var ty () : var =
       Binding ("<anonymous>", next_var_id (), User, [], ty)
     in
-    let translate_ast_typ ctx tvs : ast_typ -> core_type m_result =
+    let translate_ast_typ ctx tvs : Ast.typ -> typ m_result =
       (* substitute N types for N variables (QVars) in typ *)
-      let rec subst (rho : (core_qvar * core_type) list) typ =
+      let rec subst (rho : (qvar * typ) list) typ =
         match ground typ with
         | CQVar (QVar (name, id)) ->
           (match List.find_opt (fun (QVar (_, id'), _) -> id = id') rho with
@@ -1372,16 +1376,16 @@ module Elab = struct
       in
       let rec go ctx =
         function
-        | TVar (s, sp) ->
+        | Ast.(TVar (s, sp)) ->
           (match tvs_lookup tvs s with
           | None -> Error (E ("(impossible?) binding not found for tvar: " ^ s
                               ^ " " ^ Token.describe_span sp))
           | Some ty -> Ok ty)
-        | TCon (MModule mod_name :: ms, name, sp, args) ->
+        | Ast.(TCon (MModule mod_name :: ms, name, sp, args)) ->
           (match Ctx.extend_open_over ctx mod_name with
            | None     -> Error (E ("module not in scope: " ^ mod_name))
-           | Some ctx -> go ctx (TCon (ms, name, sp, args)))
-        | TCon ([], name, sp, args) ->
+           | Some ctx -> go ctx Ast.(TCon (ms, name, sp, args)))
+        | Ast.(TCon ([], name, sp, args)) ->
           match Ctx.lookup_ty name ctx with
           | None -> Error (E ("type constructor not in scope: " ^ name))
           | Some decl ->
@@ -1397,7 +1401,7 @@ module Elab = struct
                 subst (List.map2 (fun p a -> (p, a)) params args') definition
       in go ctx
     in
-    let translate_ast_typ_decl : (string list * string * ast_typ_decl) list ->
+    let translate_ast_typ_decl : (string list * string * Ast.typ_decl) list ->
                                  Ctx.t -> Ctx.t m_result =
       (* we process a group of type declarations in several stages, to avoid
          creating cyclic type aliases:
@@ -1413,7 +1417,7 @@ module Elab = struct
                                      (ty_params, name, decl) ->
           let arity = List.length ty_params in
           let ty_params_qvs = List.map (fun s -> (s, QVar (s, next_var_id ()))) ty_params in
-          let* (ty_params_map : core_type StringMap.t) =
+          let* (ty_params_map : typ StringMap.t) =
             fold_left_m error_monad (fun acc (s, qv) ->
               match StringMap.insert s (CQVar qv) acc with
               | Some map -> Ok map
@@ -1429,7 +1433,7 @@ module Elab = struct
                      | None   -> Ok (CCon (name, next_con_id ()))
           in
           match decl with
-          | Datatype constructors ->
+          | Ast.(Datatype constructors) ->
             (* step 1 *)
             let add_adts' ctx =
               let* ctx = add_adts ctx in
@@ -1455,7 +1459,7 @@ module Elab = struct
                             return_type)))
               ) ctx constructors
             in Ok (add_adts', add_aliases, add_conss')
-          | Alias ty ->
+          | Ast.(Alias ty) ->
             (* step 2 *)
             let add_aliases' ctx =
               let* ctx = add_aliases ctx in
@@ -1470,7 +1474,7 @@ module Elab = struct
       in
       add_adts ctx >>= add_aliases >>= add_conss
     in
-    let generalize (lvl : core_level) : core_type list -> core_qvar list * core_type list =
+    let generalize (lvl : level) : typ list -> qvar list * typ list =
       (* TODO: we don't need to return a new type list here *)
       let rec go ty qvars =
         match ty with
@@ -1493,7 +1497,7 @@ module Elab = struct
         map_m state_monad go tys qvars
       in fun tys -> go_list tys []
     in
-    let instantiate lvl (qvars : core_qvar list) () : core_type -> core_type =
+    let instantiate lvl (qvars : qvar list) () : typ -> typ =
       let qvars = List.map (fun var -> let (QVar (name, _)) = var in
                                        (var, new_uvar lvl (Some name) ())) qvars in
       let rec go ty = match ty with
@@ -1521,7 +1525,7 @@ module Elab = struct
        - create a new Var (with ids and new uvars for types) for each bound variable;
        - traverse the pattern again, translating each identifier to its corresponding Var.
        *)
-    let pat_bound_vars : core_level -> ast_pat -> core_var StringMap.t m_result =
+    let pat_bound_vars : level -> Ast.pat -> var StringMap.t m_result =
       let rec go =
         function
         | POr (p1, p2) -> let* v1 = go p1 in
@@ -1553,8 +1557,8 @@ module Elab = struct
             Binding (s, next_var_id (), User, [], new_uvar lvl (Some s) ())
           ) bindings)
     (* TODO: exhaustiveness checking? *)
-    and infer_pat_with_vars lvl tvs ctx (bindings : core_var StringMap.t) :
-                            ast_pat -> (core_pat * core_type) m_result =
+    and infer_pat_with_vars lvl tvs ctx (bindings : var StringMap.t) :
+                            Ast.pat -> (pat * typ) m_result =
       let rec go ctx =
         function
         | POr (p1, p2) -> let* (p1', ty1) = go ctx p1 in
@@ -1603,7 +1607,7 @@ module Elab = struct
       in go ctx
     in
     (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
-    let infer_pat lvl tvs : Ctx.t -> ast_pat -> (Ctx.t * (core_pat * core_type)) m_result =
+    let infer_pat lvl tvs : Ctx.t -> Ast.pat -> (Ctx.t * (pat * typ)) m_result =
       fun ctx pat ->
       let* bindings = pat_bound_vars lvl pat in
       let* pat' = infer_pat_with_vars lvl tvs ctx bindings pat in
@@ -1611,10 +1615,10 @@ module Elab = struct
       Ok (ctx', pat')
     in
     (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
-    let infer_pats lvl tvs : Ctx.t -> ast_pat list -> (Ctx.t * (core_pat * core_type) list) m_result =
+    let infer_pats lvl tvs : Ctx.t -> Ast.pat list -> (Ctx.t * (pat * typ) list) m_result =
       Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl tvs)))
     in
-    let rec infer lvl ctx : ast_expr -> (core_expr * core_type) m_result =
+    let rec infer lvl ctx : Ast.expr -> (expr * typ) m_result =
       function
       | Tuple es ->
         let* elab = map_m error_monad (infer lvl ctx) es in
@@ -1715,7 +1719,7 @@ module Elab = struct
           ground ty_arg --> ground ty_res
         )
     (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
-    and infer_bindings lvl : Ctx.t -> ast_bindings -> (Ctx.t * core_bindings) m_result =
+    and infer_bindings lvl : Ctx.t -> Ast.bindings -> (Ctx.t * bindings) m_result =
       fun ctx (Bindings (is_rec, bindings)) ->
       let lvl' = lvl + 1 in
       let tvs = tvs_new_dynamic (fun s -> new_uvar lvl' (Some s) ()) () in
@@ -1772,10 +1776,10 @@ module Elab = struct
                 Ok false
             in
             (* TODO: support type ascriptions in expression position *)
-            Ok (bound_vars, can_generalize, ((head', args', None, rhs') (* : core_binding *)))
+            Ok (bound_vars, can_generalize, ((head', args', None, rhs') (* : binding *)))
           ) bindings
       in
-      let bound_vars : core_var list =
+      let bound_vars : var list =
         (* flatten the maps in `bindings`; order is irrelevant, and we
            already know them to be disjoint *)
         List.fold_left (fun acc (bv, _, _) ->
@@ -1786,7 +1790,7 @@ module Elab = struct
          of definitions if every single one meets the criteria *)
       let can_generalize =
         List.fold_left (fun acc (_, cg, _) -> acc && cg) true bindings in
-      let bound_vars : core_var list =
+      let bound_vars : var list =
         if not can_generalize then
           (Miniml.debug (fun () ->
             "defined: " ^
@@ -1827,23 +1831,24 @@ module Elab = struct
       )
     in
     (* TODO: enforce statically that this does not modify the parent of `ctx` *)
-    let rec translate_decls ctx : ast_decl list -> (Ctx.t * core_bindings list list) m_result =
+    let rec translate_decls ctx : Ast.decl list -> (Ctx.t * bindings list list) m_result =
       fun decls ->
       map_m error_state_monad
           (fun decl ctx ->
             match decl with
-            | Let bindings               -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings in
-                                            Ok (ctx, bindings' :: [])
-            | Types decls                -> let* ctx = translate_ast_typ_decl decls ctx in
-                                            Ok (ctx, [])
-            | Module ((name, sp), decls) -> let ctx' = Ctx.extend_new_layer ctx in
-                                            let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' decls in
-                                            let ctx = Ctx.(extend_mod ctx (CModule (name, new_layer))) in
-                                            (* TODO: use of List.concat here is not ideal for performance *)
-                                            Ok (ctx, List.concat inner_bindings)
-            | Open (name, sp)            -> match Ctx.extend_open_under ctx name with
-                                            | Some ctx -> Ok (ctx, [])
-                                            | None     -> Error (E ("module not in scope: " ^ name))
+            | Ast.(Let bindings)    -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings in
+                                       Ok (ctx, bindings' :: [])
+            | Ast.(Types decls)     -> let* ctx = translate_ast_typ_decl decls ctx in
+                                       Ok (ctx, [])
+            | Ast.(Module (
+                (name, sp), decls)) -> let ctx' = Ctx.extend_new_layer ctx in
+                                       let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' decls in
+                                       let ctx = Ctx.(extend_mod ctx (CModule (name, new_layer))) in
+                                       (* TODO: use of List.concat here is not ideal for performance *)
+                                       Ok (ctx, List.concat inner_bindings)
+            | Ast.(Open (name, sp)) -> match Ctx.extend_open_under ctx name with
+                                       | Some ctx -> Ok (ctx, [])
+                                       | None     -> Error (E ("module not in scope: " ^ name))
           ) decls ctx
     in
     let* (_, ast') = translate_decls initial_ctx ast
@@ -1851,9 +1856,12 @@ module Elab = struct
 
 end
 
+open CommonSyntax
+open Core
+
 type compile_target = | Scheme
 
-let compile (target : compile_target) (decls : core) : string =
+let compile (target : compile_target) (decls : Core.core) : string =
   let result = ref [] in
   let emit s = result := (s :: deref result) in
   let tmp_var =
@@ -1923,7 +1931,7 @@ let compile (target : compile_target) (decls : core) : string =
       | (User, _) -> "'" ^ name ^ string_of_int id
       | _ -> invalid_arg "builtin constructors are handled specially"
     in
-    let rec pat_local_vars : core_pat -> core_var list =
+    let rec pat_local_vars : pat -> var list =
       function
       | POr (p, _)   -> pat_local_vars p (* will be the same in both branches *)
       | PList ps
@@ -1933,10 +1941,10 @@ let compile (target : compile_target) (decls : core) : string =
       | PWild        -> []
       | PVar v       -> v :: []
       | POpenIn (_, _)
-                     -> invalid_arg "POpenIn should no longer be present in core_pat"
+                     -> invalid_arg "POpenIn should no longer be present in Core.pat"
       | PAsc (_, vd) -> Void.absurd vd
     in
-    let rec go_pat : core_pat -> string =
+    let rec go_pat : pat -> string =
       (* TODO: a lot of opportunities to generate more sensible/idiomatic code here *)
       function
       | POr (p1, p2) -> "(or " ^ go_pat p1 ^ " " ^ go_pat p2 ^ ")"
@@ -1987,11 +1995,11 @@ let compile (target : compile_target) (decls : core) : string =
       | PIntLit i -> "(= scrutinee " ^ go_int i ^ ")"
       | PStrLit s -> "(string=? scrutinee " ^ go_str s ^ ")"
       | PVar v -> "(begin (set! " ^ go_var v ^ " scrutinee) #t)"
-      | POpenIn (_, _) -> invalid_arg "POpenIn should no longer be present in core_pat"
+      | POpenIn (_, _) -> invalid_arg "POpenIn should no longer be present in Core.pat"
       | PAsc (_, vd) -> Void.absurd vd
       | PWild -> "#t"
     in
-    let rec go_expr : core_expr -> string =
+    let rec go_expr : expr -> string =
       function
       | Tuple [] ->
         "'()"
@@ -2027,7 +2035,7 @@ let compile (target : compile_target) (decls : core) : string =
       | Var v ->
         go_var v
       | OpenIn (_, _) ->
-        invalid_arg "OpenIn should no longer be present in core_expr"
+        invalid_arg "OpenIn should no longer be present in Core.expr"
       | App (e1, e2) ->
         let e1' = go_expr e1 in
         let e2' = go_expr e2 in
@@ -2082,7 +2090,7 @@ let compile (target : compile_target) (decls : core) : string =
       | Fun (arg :: args, body) ->
         go_expr (Fun (arg :: [], Fun (args, body)))
       | Function _ ->
-        invalid_arg "Function should no longer be present in core_expr"
+        invalid_arg "Function should no longer be present in Core.expr"
     and bindings (Bindings (_, bs)) =
       (* TODO: if the bindings aren't recursive, we can declare all these one binding a time *)
       let locals = List.concat (List.map (fun (p, _, _, _) -> pat_local_vars p) bs) in
