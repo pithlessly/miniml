@@ -251,6 +251,7 @@ type ast_decl     = | Let      of ast_bindings
                                   * string
                                   * ast_typ_decl
                                   ) list
+                    | Module   of (string * span) * ast_decl list
 type ast = ast_decl list
 
 (* parser combinators *)
@@ -814,7 +815,7 @@ let parse: token list -> ast m_result =
     k input (Bindings (is_rec, bindings))))
   in
 
-  let decls =
+  let rec decls input k =
     many (fun input k ->
       match input with
       | KType :: input ->
@@ -823,8 +824,21 @@ let parse: token list -> ast m_result =
       | KLet :: input ->
         val_bindings input (fun input bindings ->
         k input (Some (Let bindings)))
+      | KModule :: input ->
+        module_decl input (fun input (name, decls) ->
+        k input (Some (Module (name, decls))))
       | _ -> k input None
-    )
+    ) input k
+  and module_decl input k =
+    let p =
+      seq (ident_upper @>
+           equal       @>
+           k_struct    @>
+           decls       @>
+           k_end       @>
+      fin (fun ident () () decls () ->
+        (ident, decls)))
+    in p input k
   in
 
   fun tokens ->
@@ -1065,6 +1079,8 @@ let extend_mod = ctx_update layer_extend_mod
 let extend_open : ctx -> string -> ctx option =
   fun ctx mod_name ->
     Option.map (fun (CModule (_, layer)) -> Ctx (layer, Some ctx)) (lookup_mod mod_name ctx)
+let extend_new_layer : ctx -> ctx =
+  fun ctx -> Ctx (empty_layer, Some ctx)
 
 let initial_ctx
   (next_var_id : unit -> core_var_id)
@@ -1555,6 +1571,7 @@ let elab (ast : ast) : core m_result =
       | PWild        -> Ok (PWild, new_uvar lvl None ())
     in go ctx
   in
+  (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
   let infer_pat lvl tvs : ctx -> ast_pat -> (ctx * (core_pat * core_type)) m_result =
     fun ctx pat ->
     let* bindings = pat_bound_vars lvl pat in
@@ -1562,6 +1579,7 @@ let elab (ast : ast) : core m_result =
     let ctx' = StringMap.fold (fun ctx _ v -> extend ctx v) ctx bindings in
     Ok (ctx', pat')
   in
+  (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
   let infer_pats lvl tvs : ctx -> ast_pat list -> (ctx * (core_pat * core_type) list) m_result =
     Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl tvs)))
   in
@@ -1665,6 +1683,7 @@ let elab (ast : ast) : core m_result =
         Fun (PVar param :: [], Match (Var param, cases')),
         ground ty_arg --> ground ty_res
       )
+  (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
   and infer_bindings lvl : ctx -> ast_bindings -> (ctx * core_bindings) m_result =
     fun ctx (Bindings (is_rec, bindings)) ->
     let lvl' = lvl + 1 in
@@ -1776,15 +1795,26 @@ let elab (ast : ast) : core m_result =
       Bindings (is_rec, bindings)
     )
   in
-  let* (_, ast') =
+  (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
+  let rec translate_decls (ctx : ctx) : ast_decl list -> (ctx * core_bindings list list) m_result =
+    fun decls ->
     map_m error_state_monad
         (fun decl ctx ->
           match decl with
-          | Let bindings -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings
-                            in Ok (ctx, bindings' :: [])
-          | Types decls  -> let* ctx = translate_ast_typ_decl decls ctx
-                            in Ok (ctx, [])
-        ) ast initial_ctx
+          | Let bindings               -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings in
+                                          Ok (ctx, bindings' :: [])
+          | Types decls                -> let* ctx = translate_ast_typ_decl decls ctx in
+                                          Ok (ctx, [])
+          | Module ((name, sp), decls) -> let ctx' = extend_new_layer ctx in
+                                          (* because translate_decls only extends the topmost layer of the context it is passed,
+                                             we know that the discarded parent here must be the same as `ctx` *)
+                                          let* (Ctx (new_layer, _), inner_bindings) = translate_decls ctx' decls in
+                                          let ctx = extend_mod ctx (CModule (name, new_layer)) in
+                                          (* TODO: use of List.concat here is not ideal for performance *)
+                                          Ok (ctx, List.concat inner_bindings)
+        ) decls ctx
+  in
+  let* (_, ast') = translate_decls initial_ctx ast
   in Ok (List.concat ast')
 
 type compile_target = | Scheme
