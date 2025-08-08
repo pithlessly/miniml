@@ -160,7 +160,7 @@ let lex str =
   in
   go 0 []
 
-type mod_expr = | Module of string
+type mod_expr = | MModule of string
 type ('var, 'con, 'ty) pat =
                                | POr      of ('var, 'con, 'ty) pat
                                            * ('var, 'con, 'ty) pat
@@ -370,7 +370,7 @@ let parse: token list -> ast m_result =
         ty_base input (fun input ts ->
         match ts with
         | TCon (modules, v, sp, params) :: [] ->
-            k input (TCon (Module name :: modules, v, sp, params) :: [])
+            k input (TCon (MModule name :: modules, v, sp, params) :: [])
         | _  -> Error (E "only do 'Module.tycon' please"))
       | OpenParen :: input ->
         let rec go input ts =
@@ -388,7 +388,7 @@ let parse: token list -> ast m_result =
     let rec go input params =
       let rec tycon (modules : mod_expr list) : (mod_expr list * string * span) option parser = fun input k ->
         match input with
-        | IdentUpper (name, _) :: Dot :: input -> tycon (Module name :: modules) input k
+        | IdentUpper (name, _) :: Dot :: input -> tycon (MModule name :: modules) input k
         | IdentLower (v, sp)          :: input -> k input (Some (List.rev modules, v, sp))
         | _                                    -> k input None
       in
@@ -504,7 +504,7 @@ let parse: token list -> ast m_result =
     | IdentUpper (mod_name, _) :: Dot
                    :: input -> (* See NOTE "OpenIn" *)
                                force "expected pattern" pattern3 input (fun input sub_pat ->
-                               k input (Some (POpenIn (Module mod_name, sub_pat))))
+                               k input (Some (POpenIn (MModule mod_name, sub_pat))))
     | TkCharLit c  :: input -> k input (Some (PCharLit c))
     | TkIntLit i   :: input -> k input (Some (PIntLit i))
     | TkStrLit s   :: input -> k input (Some (PStrLit s))
@@ -758,7 +758,7 @@ let parse: token list -> ast m_result =
              List.String.print_endline = print_endline
          *)
       force "expected expression" expr3 input (fun input sub_expr ->
-        k input (Some (OpenIn (Module mod_name, sub_expr)))
+        k input (Some (OpenIn (MModule mod_name, sub_expr)))
       )
     | IdentUpper (s, sp) (* TODO: use sp *)
                    :: input -> k input (Some (Con (s, None))) (* duplicated from expr2 *)
@@ -1307,7 +1307,7 @@ let elab (ast : ast) : core m_result =
         | None -> Error (E ("(impossible?) binding not found for tvar: " ^ s
                             ^ " " ^ describe_span sp))
         | Some ty -> Ok ty)
-      | TCon (Module mod_name :: ms, name, sp, args) ->
+      | TCon (MModule mod_name :: ms, name, sp, args) ->
         (match extend_open ctx mod_name with
          | None     -> Error (E ("module not in scope: " ^ mod_name))
          | Some ctx -> go ctx (TCon (ms, name, sp, args)))
@@ -1521,7 +1521,7 @@ let elab (ast : ast) : core m_result =
                                                ^ " " ^ describe_span sp))
                          | Some v -> let (Binding (_, _, _, _, ty)) = v in
                                      Ok (PVar v, ty))
-      | POpenIn (Module name, p)
+      | POpenIn (MModule name, p)
                      -> (match extend_open ctx name with
                          | Some ctx -> go ctx p
                          | None     -> Error (E ("module not in scope: " ^ name)))
@@ -1576,7 +1576,7 @@ let elab (ast : ast) : core m_result =
               let (Binding (_, _, _, qvars, ty)) = v in
               let ty = instantiate lvl qvars () ty in
               Ok (Var v, ty))
-    | OpenIn (Module name, e) -> (
+    | OpenIn (MModule name, e) -> (
       match extend_open ctx name with
       | Some ctx -> infer lvl ctx e
       | None     -> Error (E ("module not in scope: " ^ name)))
