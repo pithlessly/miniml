@@ -1856,263 +1856,267 @@ module Elab = struct
 
 end
 
-open CommonSyntax
-open Core
+module Compile = struct
 
-type compile_target = | Scheme
+  open CommonSyntax
+  open Core
 
-let compile (target : compile_target) (decls : Core.core) : string =
-  let result = ref [] in
-  let emit s = result := (s :: deref result) in
-  let tmp_var =
-    let next_id = counter () in
-    fun () -> ("t" ^ string_of_int (next_id ()))
-  in
-  let scheme () =
-    let indent = ref 0 in
-    let indent n f =
-      let old = deref indent in
-      indent := old + n;
-      let result = f () in
-      indent := old;
-      result
-    and emit_ln s = emit (String.make (deref indent) ' ' ^ s ^ "\n")
+  type compile_target = | Scheme
+
+  let compile (target : compile_target) (decls : core) : string =
+    let result = ref [] in
+    let emit s = result := (s :: deref result) in
+    let tmp_var =
+      let next_id = counter () in
+      fun () -> ("t" ^ string_of_int (next_id ()))
     in
-    let sequence expr =
-      let v = tmp_var () in
-      emit_ln ("(define " ^ v ^ " " ^ expr ^ ")");
-      v
-    in
-    let go_char c =
-      let code = int_of_char c in
-      if 32 < code && code < 128 then
-        "#\\" ^ String.make 1 c
-      else if c = ' ' then
-        "#\\space"
-      else if c = '\n' then
-        "#\\newline"
-      else if c = '\r' then
-        "(integer->char 13)"
-      else
-        invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
-    and go_int = string_of_int
-    and go_str s =
-      let rec go acc i =
-        if i < 0 then String.concat "" ("\"" :: acc) else
-        let c = match String.get s i with
-                | '"'  -> "\\\""
-                | '\\' -> "\\\\"
-                | '\n' -> "\\n"
-                | '\r' -> "\\r"
-                | c    -> let code = int_of_char c in
-                          if 32 <= code && code < 128 then
-                            String.make 1 c
-                          else
-                            invalid_arg ("we don't yet support this character code: "
-                                        ^ string_of_int code)
-        in go (c :: acc) (i - 1)
-      in go ("\"" :: []) (String.length s - 1)
-    in
-    let go_var (Binding (name, id, prov, _, _)) =
-      match prov with
-      | User ->
-        (* TODO: filter out quotes from the string name, then use it *)
-        "v" ^ string_of_int id
-      | Builtin prefix ->
-        match name with
-        | ";"  -> "miniml-semicolon"
-        | "::" -> "miniml-cons"
-        | _    -> "miniml-" ^ prefix ^ name
-    and go_cvar (CBinding (name, id, prov, _, _, _)) =
-      match (prov, name) with
-      (* TODO: avoid special casing these constructors *)
-      | (Builtin "StringMap.", "DupErr")
-      | (Builtin "", ("Error" | "Ok")) -> "'" ^ name
-      | (User, _) -> "'" ^ name ^ string_of_int id
-      | _ -> invalid_arg "builtin constructors are handled specially"
-    in
-    let rec pat_local_vars : pat -> var list =
-      function
-      | POr (p, _)   -> pat_local_vars p (* will be the same in both branches *)
-      | PList ps
-      | PTuple ps    -> List.concat (List.map pat_local_vars ps)
-      | PCon (_, ps) -> List.concat (List.map pat_local_vars (Option.unwrap ps))
-      | PCharLit _ | PIntLit _ | PStrLit _
-      | PWild        -> []
-      | PVar v       -> v :: []
-      | POpenIn (_, _)
-                     -> invalid_arg "POpenIn should no longer be present in Core.pat"
-      | PAsc (_, vd) -> Void.absurd vd
-    in
-    let rec go_pat : pat -> string =
-      (* TODO: a lot of opportunities to generate more sensible/idiomatic code here *)
-      function
-      | POr (p1, p2) -> "(or " ^ go_pat p1 ^ " " ^ go_pat p2 ^ ")"
-      | PTuple [] -> "#t"
-      | PTuple ps -> "(and" ^ (String.concat ""
-                       (List.mapi
-                         (fun idx p ->
-                           " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int idx ^ "))) "
-                           ^ go_pat p ^ ")") ps)) ^ ")"
-      | PList [] -> "(null? scrutinee)"
-      | PList (p :: ps) ->
-        "(and (pair? scrutinee) " ^
-            " (let ((scrutinee (car scrutinee))) " ^ go_pat p          ^ ")" ^
-            " (let ((scrutinee (cdr scrutinee))) " ^ go_pat (PList ps) ^ "))"
-      | PCon (c, ps) ->
-        let ps = Option.unwrap ps in
-        let vector_layout () =
-          match ps with
-          | [] -> "(eq? scrutinee " ^ go_cvar c ^ ")"
-          | _ ->
-            "(and (vector? scrutinee) (eq? (vector-ref scrutinee 0) " ^ go_cvar c ^ ")" ^ (String.concat ""
-              (List.mapi
-                (fun idx p ->
-                  " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int (idx + 1) ^ "))) "
-                  ^ go_pat p ^ ")") ps)) ^ ")"
-        in (
-        match c with
-        | CBinding (name, _, User, _, _, _) -> vector_layout ()
-        | CBinding (name, _, Builtin _, _, _, _) ->
-          match (name, ps) with
-          | ("true",  []) -> "scrutinee"
-          | ("false", []) -> "(not scrutinee)"
-          | ("::", p1 :: p2 :: []) ->
-            "(and (pair? scrutinee)" ^
-                " (let ((scrutinee (car scrutinee))) " ^
-                    go_pat p1 ^ ")" ^
-                " (let ((scrutinee (cdr scrutinee))) " ^
-                    go_pat p2 ^ "))"
-          | ("None",      []) -> "(null? scrutinee)"
-          | ("Some", p :: []) -> "(and (pair? scrutinee)" ^
-                                     " (let ((scrutinee (car scrutinee))) " ^
-                                         go_pat p ^ "))"
-          (* TODO: DupErr could use newtype layout *)
-          | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
-          | (_, ps) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
-                             ^ string_of_int (List.length ps)))
-      | PCharLit c -> "(char=? scrutinee " ^ go_char c ^ ")"
-      | PIntLit i -> "(= scrutinee " ^ go_int i ^ ")"
-      | PStrLit s -> "(string=? scrutinee " ^ go_str s ^ ")"
-      | PVar v -> "(begin (set! " ^ go_var v ^ " scrutinee) #t)"
-      | POpenIn (_, _) -> invalid_arg "POpenIn should no longer be present in Core.pat"
-      | PAsc (_, vd) -> Void.absurd vd
-      | PWild -> "#t"
-    in
-    let rec go_expr : expr -> string =
-      function
-      | Tuple [] ->
-        "'()"
-      | Tuple es ->
-        "(vector " ^ (String.concat " " (List.map go_expr es)) ^ ")"
-      | List es ->
-        List.fold_right (fun e acc -> "(cons " ^ e ^ " " ^ acc ^ ")")
-          (List.map go_expr es) "'()"
-      | Con (c, es) ->
-        let es = Option.unwrap es in
-        let vector_layout () =
-          match es with
-          | [] -> go_cvar c
-          | _ ->
-            "(vector " ^ go_cvar c ^ (String.concat ""
-              (List.map (fun e -> " " ^ go_expr e) es)) ^ ")"
-        in (
-        match c with
-        | CBinding (name, _, User, _, _, _) -> vector_layout ()
-        | CBinding (name, _, Builtin _, _, _, _) ->
-          match (name, es) with
-          | ("true",  []) -> "#t"
-          | ("false", []) -> "#f"
-          | ("None",      []) -> "'()"
-          | ("Some", e :: []) -> "(list " ^ go_expr e ^ ")"
-          (* TODO: DupErr could use newtype layout *)
-          | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
-          | (_, es) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
-                             ^ string_of_int (List.length es)))
-      | CharLit c -> go_char c
-      | IntLit i -> go_int i
-      | StrLit s -> go_str s
-      | Var v ->
-        go_var v
-      | OpenIn (_, _) ->
-        invalid_arg "OpenIn should no longer be present in Core.expr"
-      | App (e1, e2) ->
-        let e1' = go_expr e1 in
-        let e2' = go_expr e2 in
-        sequence ("(" ^ e1' ^ " " ^ e2' ^ ")")
-      | LetIn (bs, e) ->
-        bindings bs;
-        go_expr e
-      | Match (scrutinee, branches) ->
-        (
-          let locals = List.concat (List.map (fun (p, _) -> pat_local_vars p) branches) in
-          emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals))
-        );
-        let scrutinee' = go_expr scrutinee in
-        let tv = tmp_var () in
-        emit_ln ("(define " ^ tv ^ " (let ((scrutinee " ^ scrutinee' ^ "))");
-        indent 2 (fun () ->
-          emit_ln "(cond";
-          let last_is_t = ref false in
-          List.iter (fun (pat, e) ->
-            let pat' = go_pat pat in
-            last_is_t := (pat' = "#t");
-            emit_ln (" (" ^ go_pat pat);
-            emit_ln ("  (let ()");
-            indent 4 (fun () -> emit_ln (go_expr e ^ "))"))
-          ) branches;
-          emit_ln (if deref last_is_t then " )))"
-                                      else " (else (miniml-match-failure)))))"));
-        tv
-      | IfThenElse (e_cond, e_then, e_else) ->
-        let e_cond' = go_expr e_cond in
-        let tv = tmp_var () in
-        emit_ln ("(define " ^ tv ^ " (if " ^ e_cond');
-        indent 2 (fun () ->
-          emit_ln "(let ()";
-          indent 2 (fun () -> emit_ln (go_expr e_then ^ ")"));
-          emit_ln "(let ()";
-          indent 2 (fun () -> emit_ln (go_expr e_else ^ ")))"))
-        );
-        tv
-      | Fun ([], body) ->
-        go_expr body
-      | Fun (arg :: [], body) ->
-        let tv = tmp_var () in
-        emit_ln ("(define " ^ tv ^ " (lambda (scrutinee)");
-        indent 2 (fun () ->
-          let locals = pat_local_vars arg in
-          emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
-          emit_ln ("(miniml-fun-guard " ^ go_pat arg ^ ")");
-          emit_ln (go_expr body ^ "))")
-        );
-        tv
-      | Fun (arg :: args, body) ->
-        go_expr (Fun (arg :: [], Fun (args, body)))
-      | Function _ ->
-        invalid_arg "Function should no longer be present in Core.expr"
-    and bindings (Bindings (_, bs)) =
-      (* TODO: if the bindings aren't recursive, we can declare all these one binding a time *)
-      let locals = List.concat (List.map (fun (p, _, _, _) -> pat_local_vars p) bs) in
-      emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
-      emit_ln "(miniml-let-guard (and";
-      indent 2 (fun () ->
-        List.iter (fun (head, args, _, rhs) ->
-          let rhs = Fun (args, rhs) in
-          emit_ln "(let ((scrutinee (let ()";
+    let scheme () =
+      let indent = ref 0 in
+      let indent n f =
+        let old = deref indent in
+        indent := old + n;
+        let result = f () in
+        indent := old;
+        result
+      and emit_ln s = emit (String.make (deref indent) ' ' ^ s ^ "\n")
+      in
+      let sequence expr =
+        let v = tmp_var () in
+        emit_ln ("(define " ^ v ^ " " ^ expr ^ ")");
+        v
+      in
+      let go_char c =
+        let code = int_of_char c in
+        if 32 < code && code < 128 then
+          "#\\" ^ String.make 1 c
+        else if c = ' ' then
+          "#\\space"
+        else if c = '\n' then
+          "#\\newline"
+        else if c = '\r' then
+          "(integer->char 13)"
+        else
+          invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
+      and go_int = string_of_int
+      and go_str s =
+        let rec go acc i =
+          if i < 0 then String.concat "" ("\"" :: acc) else
+          let c = match String.get s i with
+                  | '"'  -> "\\\""
+                  | '\\' -> "\\\\"
+                  | '\n' -> "\\n"
+                  | '\r' -> "\\r"
+                  | c    -> let code = int_of_char c in
+                            if 32 <= code && code < 128 then
+                              String.make 1 c
+                            else
+                              invalid_arg ("we don't yet support this character code: "
+                                          ^ string_of_int code)
+          in go (c :: acc) (i - 1)
+        in go ("\"" :: []) (String.length s - 1)
+      in
+      let go_var (Binding (name, id, prov, _, _)) =
+        match prov with
+        | User ->
+          (* TODO: filter out quotes from the string name, then use it *)
+          "v" ^ string_of_int id
+        | Builtin prefix ->
+          match name with
+          | ";"  -> "miniml-semicolon"
+          | "::" -> "miniml-cons"
+          | _    -> "miniml-" ^ prefix ^ name
+      and go_cvar (CBinding (name, id, prov, _, _, _)) =
+        match (prov, name) with
+        (* TODO: avoid special casing these constructors *)
+        | (Builtin "StringMap.", "DupErr")
+        | (Builtin "", ("Error" | "Ok")) -> "'" ^ name
+        | (User, _) -> "'" ^ name ^ string_of_int id
+        | _ -> invalid_arg "builtin constructors are handled specially"
+      in
+      let rec pat_local_vars : pat -> var list =
+        function
+        | POr (p, _)   -> pat_local_vars p (* will be the same in both branches *)
+        | PList ps
+        | PTuple ps    -> List.concat (List.map pat_local_vars ps)
+        | PCon (_, ps) -> List.concat (List.map pat_local_vars (Option.unwrap ps))
+        | PCharLit _ | PIntLit _ | PStrLit _
+        | PWild        -> []
+        | PVar v       -> v :: []
+        | POpenIn (_, _)
+                       -> invalid_arg "POpenIn should no longer be present in Core.pat"
+        | PAsc (_, vd) -> Void.absurd vd
+      in
+      let rec go_pat : pat -> string =
+        (* TODO: a lot of opportunities to generate more sensible/idiomatic code here *)
+        function
+        | POr (p1, p2) -> "(or " ^ go_pat p1 ^ " " ^ go_pat p2 ^ ")"
+        | PTuple [] -> "#t"
+        | PTuple ps -> "(and" ^ (String.concat ""
+                         (List.mapi
+                           (fun idx p ->
+                             " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int idx ^ "))) "
+                             ^ go_pat p ^ ")") ps)) ^ ")"
+        | PList [] -> "(null? scrutinee)"
+        | PList (p :: ps) ->
+          "(and (pair? scrutinee) " ^
+              " (let ((scrutinee (car scrutinee))) " ^ go_pat p          ^ ")" ^
+              " (let ((scrutinee (cdr scrutinee))) " ^ go_pat (PList ps) ^ "))"
+        | PCon (c, ps) ->
+          let ps = Option.unwrap ps in
+          let vector_layout () =
+            match ps with
+            | [] -> "(eq? scrutinee " ^ go_cvar c ^ ")"
+            | _ ->
+              "(and (vector? scrutinee) (eq? (vector-ref scrutinee 0) " ^ go_cvar c ^ ")" ^ (String.concat ""
+                (List.mapi
+                  (fun idx p ->
+                    " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int (idx + 1) ^ "))) "
+                    ^ go_pat p ^ ")") ps)) ^ ")"
+          in (
+          match c with
+          | CBinding (name, _, User, _, _, _) -> vector_layout ()
+          | CBinding (name, _, Builtin _, _, _, _) ->
+            match (name, ps) with
+            | ("true",  []) -> "scrutinee"
+            | ("false", []) -> "(not scrutinee)"
+            | ("::", p1 :: p2 :: []) ->
+              "(and (pair? scrutinee)" ^
+                  " (let ((scrutinee (car scrutinee))) " ^
+                      go_pat p1 ^ ")" ^
+                  " (let ((scrutinee (cdr scrutinee))) " ^
+                      go_pat p2 ^ "))"
+            | ("None",      []) -> "(null? scrutinee)"
+            | ("Some", p :: []) -> "(and (pair? scrutinee)" ^
+                                       " (let ((scrutinee (car scrutinee))) " ^
+                                           go_pat p ^ "))"
+            (* TODO: DupErr could use newtype layout *)
+            | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
+            | (_, ps) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
+                               ^ string_of_int (List.length ps)))
+        | PCharLit c -> "(char=? scrutinee " ^ go_char c ^ ")"
+        | PIntLit i -> "(= scrutinee " ^ go_int i ^ ")"
+        | PStrLit s -> "(string=? scrutinee " ^ go_str s ^ ")"
+        | PVar v -> "(begin (set! " ^ go_var v ^ " scrutinee) #t)"
+        | POpenIn (_, _) -> invalid_arg "POpenIn should no longer be present in Core.pat"
+        | PAsc (_, vd) -> Void.absurd vd
+        | PWild -> "#t"
+      in
+      let rec go_expr : expr -> string =
+        function
+        | Tuple [] ->
+          "'()"
+        | Tuple es ->
+          "(vector " ^ (String.concat " " (List.map go_expr es)) ^ ")"
+        | List es ->
+          List.fold_right (fun e acc -> "(cons " ^ e ^ " " ^ acc ^ ")")
+            (List.map go_expr es) "'()"
+        | Con (c, es) ->
+          let es = Option.unwrap es in
+          let vector_layout () =
+            match es with
+            | [] -> go_cvar c
+            | _ ->
+              "(vector " ^ go_cvar c ^ (String.concat ""
+                (List.map (fun e -> " " ^ go_expr e) es)) ^ ")"
+          in (
+          match c with
+          | CBinding (name, _, User, _, _, _) -> vector_layout ()
+          | CBinding (name, _, Builtin _, _, _, _) ->
+            match (name, es) with
+            | ("true",  []) -> "#t"
+            | ("false", []) -> "#f"
+            | ("None",      []) -> "'()"
+            | ("Some", e :: []) -> "(list " ^ go_expr e ^ ")"
+            (* TODO: DupErr could use newtype layout *)
+            | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
+            | (_, es) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
+                               ^ string_of_int (List.length es)))
+        | CharLit c -> go_char c
+        | IntLit i -> go_int i
+        | StrLit s -> go_str s
+        | Var v ->
+          go_var v
+        | OpenIn (_, _) ->
+          invalid_arg "OpenIn should no longer be present in Core.expr"
+        | App (e1, e2) ->
+          let e1' = go_expr e1 in
+          let e2' = go_expr e2 in
+          sequence ("(" ^ e1' ^ " " ^ e2' ^ ")")
+        | LetIn (bs, e) ->
+          bindings bs;
+          go_expr e
+        | Match (scrutinee, branches) ->
+          (
+            let locals = List.concat (List.map (fun (p, _) -> pat_local_vars p) branches) in
+            emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals))
+          );
+          let scrutinee' = go_expr scrutinee in
+          let tv = tmp_var () in
+          emit_ln ("(define " ^ tv ^ " (let ((scrutinee " ^ scrutinee' ^ "))");
           indent 2 (fun () ->
-            indent 6 (fun () -> emit_ln (go_expr rhs ^ ")))"));
-            emit_ln (go_pat head ^ ")")
-          )
-        ) bs
-      );
-      emit_ln " ))"
+            emit_ln "(cond";
+            let last_is_t = ref false in
+            List.iter (fun (pat, e) ->
+              let pat' = go_pat pat in
+              last_is_t := (pat' = "#t");
+              emit_ln (" (" ^ go_pat pat);
+              emit_ln ("  (let ()");
+              indent 4 (fun () -> emit_ln (go_expr e ^ "))"))
+            ) branches;
+            emit_ln (if deref last_is_t then " )))"
+                                        else " (else (miniml-match-failure)))))"));
+          tv
+        | IfThenElse (e_cond, e_then, e_else) ->
+          let e_cond' = go_expr e_cond in
+          let tv = tmp_var () in
+          emit_ln ("(define " ^ tv ^ " (if " ^ e_cond');
+          indent 2 (fun () ->
+            emit_ln "(let ()";
+            indent 2 (fun () -> emit_ln (go_expr e_then ^ ")"));
+            emit_ln "(let ()";
+            indent 2 (fun () -> emit_ln (go_expr e_else ^ ")))"))
+          );
+          tv
+        | Fun ([], body) ->
+          go_expr body
+        | Fun (arg :: [], body) ->
+          let tv = tmp_var () in
+          emit_ln ("(define " ^ tv ^ " (lambda (scrutinee)");
+          indent 2 (fun () ->
+            let locals = pat_local_vars arg in
+            emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
+            emit_ln ("(miniml-fun-guard " ^ go_pat arg ^ ")");
+            emit_ln (go_expr body ^ "))")
+          );
+          tv
+        | Fun (arg :: args, body) ->
+          go_expr (Fun (arg :: [], Fun (args, body)))
+        | Function _ ->
+          invalid_arg "Function should no longer be present in Core.expr"
+      and bindings (Bindings (_, bs)) =
+        (* TODO: if the bindings aren't recursive, we can declare all these one binding a time *)
+        let locals = List.concat (List.map (fun (p, _, _, _) -> pat_local_vars p) bs) in
+        emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
+        emit_ln "(miniml-let-guard (and";
+        indent 2 (fun () ->
+          List.iter (fun (head, args, _, rhs) ->
+            let rhs = Fun (args, rhs) in
+            emit_ln "(let ((scrutinee (let ()";
+            indent 2 (fun () ->
+              indent 6 (fun () -> emit_ln (go_expr rhs ^ ")))"));
+              emit_ln (go_pat head ^ ")")
+            )
+          ) bs
+        );
+        emit_ln " ))"
+      in
+      List.iter bindings decls
     in
-    List.iter bindings decls
-  in
-  (match target with
-   | Scheme -> scheme ());
-  String.concat "" (List.rev (deref result))
+    (match target with
+     | Scheme -> scheme ());
+    String.concat "" (List.rev (deref result))
+
+end
 
 let text =
   let f = In_channel.open_text "scratchpad.mini-ml" in
@@ -2123,5 +2127,5 @@ let text =
 let () =
   Miniml.trace (fun () -> "Log level: " ^ string_of_int Miniml.log_level);
   match Elab.elab =<< (Parser.parse =<< Lex.lex text) with
-  | Ok core     -> print_endline (compile Scheme core)
+  | Ok core     -> print_endline Compile.(compile Scheme core)
   | Error (E e) -> (prerr_endline ("Error: " ^ e); exit 1)
