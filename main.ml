@@ -42,10 +42,10 @@ end
 module Lex = struct
   open Token
   (* character properties *)
-  let lower c = Char.(('a' <= c && c <= 'z') || c = '_' || c = '\'')
+  let lower c = Char.(('a' <= c && c <= 'z') || c = '_')
   let upper c = Char.('A' <= c && c <= 'Z')
   let numer c = Char.('0' <= c && c <= '9')
-  let ident c = upper c || lower c || numer c
+  let ident c = upper c || lower c || numer c || c = '\''
   let symbolic = function | '!' | '&' | '*' | '+' | '-' | '.' | ':'
                           | '<' | '>' | '=' | '^' | '|' | '@' | '/' -> true
                           | _ -> false
