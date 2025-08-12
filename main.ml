@@ -1555,6 +1555,9 @@ module Elab = struct
       in
       fun lvl pat ->
         let* bindings = go pat in
+        (* NOTE: the order in which StringMap.map visits entries is unspecified --
+           this is responsible for the difference in behavior between stage1 and stage2.
+           It may be a good idea to change this to be consistent. *)
         Ok (StringMap.map
           (fun s () ->
             Binding (s, next_var_id (), User, [], new_uvar lvl (Some s) ())

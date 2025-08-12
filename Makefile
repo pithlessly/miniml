@@ -23,17 +23,21 @@ target/stage1.exe: target/main.ml target/ocamlshim.cmx
 	$(OCAMLC) -o $@ -I target ocamlshim.cmx -open Ocamlshim $<
 
 target/stage2.scm: target/stage1.exe main.ml
-	$< main.ml > target/tmp.scm
-	cp target/tmp.scm $@
-
-target/stage3.scm: target/stage2.scm main.ml prelude.scm $(SCHEME_COMPAT_LIB)
-	$(SCHEME_COMMAND) $< main.ml > target/tmp2.scm
+	$< main.ml > target/tmp2.scm
 	cp target/tmp2.scm $@
 
-.PHONY: verify_bootstrapping
-verify_bootstrapping: target/stage2.scm target/stage3.scm
+target/stage3.scm: target/stage2.scm main.ml prelude.scm $(SCHEME_COMPAT_LIB)
+	$(SCHEME_COMMAND) $< main.ml > target/tmp3.scm
+	cp target/tmp3.scm $@
+
+target/stage4.scm: target/stage3.scm main.ml prelude.scm $(SCHEME_COMPAT_LIB)
+	$(SCHEME_COMMAND) $< main.ml > target/tmp4.scm
+	cp target/tmp4.scm $@
+
+.PHONY: verify_fixpoint
+verify_fixpoint: target/stage3.scm target/stage4.scm
 	diff $^
-	@printf "\x1b[32m""bootstrapping successful!""\x1b[m""\n"
+	@printf "\x1b[32m""fixpoint successful!""\x1b[m""\n"
 
 .PHONY: clean
 clean:
