@@ -130,6 +130,9 @@
       (or (= i (string-length s))
           (and (p (string-ref s i))
                (loop (+ 1 i)) ))))))
+(define miniml-String.filter
+  (lambda (p) (lambda (s)
+    (list->string (filter p (string->list s))))))
 
 (define (miniml-Fun.id x) x)
 (define miniml-Fun.flip

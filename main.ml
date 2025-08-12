@@ -1240,6 +1240,7 @@ module Elab = struct
         add "concat"  [] (t_string --> (t_list t_string --> t_string));
         add "make"    [] (t_int --> (t_char --> t_string));
         add "for_all" [] ((t_char --> t_bool) --> (t_string --> t_bool));
+        add "filter"  [] ((t_char --> t_bool) --> (t_string --> t_string));
         ()
       ));
       let t_void = ty0 "void" in

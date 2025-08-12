@@ -21,6 +21,14 @@ let (>=) : int -> int -> bool = fun a b -> a >= b
 let (<)  : int -> int -> bool = fun a b -> a < b
 let (>)  : int -> int -> bool = fun a b -> a > b
 
+module String = struct
+  include String
+  let filter p s =
+    String.to_seq s
+    |> Seq.filter p
+    |> String.of_seq
+end
+
 module Option = struct
   let map = Option.map
   let unwrap = Option.get
