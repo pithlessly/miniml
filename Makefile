@@ -22,15 +22,12 @@ target/%.cmx: target/%.ml
 target/main.exe: target/main.ml target/ocamlshim.cmx
 	$(OCAMLC) -o $@ -I target ocamlshim.cmx -open Ocamlshim $<
 
-scratchpad.mini-ml: main.ml
-	cp $< $@
-
-target/compiled.scm: target/main.exe scratchpad.mini-ml
-	$< > target/tmp.scm
+target/compiled.scm: target/main.exe main.ml
+	$< main.ml > target/tmp.scm
 	cp target/tmp.scm $@
 
-target/compiled2.scm: target/compiled.scm prelude.scm $(SCHEME_COMPAT_LIB)
-	$(SCHEME_COMMAND) $< > target/tmp2.scm
+target/compiled2.scm: target/compiled.scm main.ml prelude.scm $(SCHEME_COMPAT_LIB)
+	$(SCHEME_COMMAND) $< main.ml > target/tmp2.scm
 	cp target/tmp2.scm $@
 
 .PHONY: verify_bootstrapping

@@ -2136,7 +2136,12 @@ module Compile = struct
 end
 
 let text =
-  let f = In_channel.open_text "scratchpad.mini-ml" in
+  let file =
+    match Miniml.argv () with
+    | _ :: file :: [] -> file
+    | _ -> invalid_arg "please provide a single filename"
+  in
+  let f = In_channel.open_text file in
   let text = In_channel.input_all f in
   In_channel.close f;
   text
