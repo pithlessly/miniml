@@ -1287,6 +1287,7 @@ module Elab = struct
         add "log_level" [] t_int;
         add "debug" [] ((t_unit --> t_string) --> t_unit);
         add "trace" [] ((t_unit --> t_string) --> t_unit);
+        add "argv" [] (t_unit --> t_list t_string);
         ()
       ));
       ()

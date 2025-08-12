@@ -72,6 +72,9 @@ module Miniml = struct
   let trace msg =
     if log_level < 2 then () else
       prerr_endline ("\x1b[33m(b trace)\x1b[m " ^ msg ())
+
+  let argv () =
+    Array.to_list Sys.argv
 end
 
 module Void : sig
