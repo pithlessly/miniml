@@ -2040,14 +2040,16 @@ module Compile = struct
         | OpenIn (_, _) ->
           invalid_arg "OpenIn should no longer be present in Core.expr"
         | App (e1, e2) ->
-          let (p1, e1') = go_expr e1 in
-          let (p2, e2') = go_expr e2 in
-          (false,
-            if p1 || p2 then
+          (false, (
+            let (p1, e1') = go_expr e1 in
+            if p1 then
+              let e2' = go_expr_impure e2 in
               "(" ^ e1' ^ " " ^ e2' ^ ")"
             else
-              "(" ^ sequence e1' ^ " " ^ e2' ^ ")"
-          )
+              let e1' = sequence e1' in
+              let e2' = go_expr_impure e2 in
+              "(" ^ e1' ^ " " ^ e2' ^ ")"
+          ))
         | LetIn (bs, e) ->
           bindings bs;
           go_expr e
