@@ -8,7 +8,7 @@ SCHEME_COMMAND    := $(SCHEME_COMMAND_$(SCHEME_IMPL))
 SCHEME_COMPAT_LIB := compat_$(SCHEME_IMPL).scm
 
 .PHONY: default
-default: target/compiled.scm
+default: target/stage2.scm
 
 target:
 	mkdir -p target
@@ -19,19 +19,19 @@ target/%.ml: %.ml target
 target/%.cmx: target/%.ml
 	$(OCAMLC) -c $<
 
-target/main.exe: target/main.ml target/ocamlshim.cmx
+target/stage1.exe: target/main.ml target/ocamlshim.cmx
 	$(OCAMLC) -o $@ -I target ocamlshim.cmx -open Ocamlshim $<
 
-target/compiled.scm: target/main.exe main.ml
+target/stage2.scm: target/stage1.exe main.ml
 	$< main.ml > target/tmp.scm
 	cp target/tmp.scm $@
 
-target/compiled2.scm: target/compiled.scm main.ml prelude.scm $(SCHEME_COMPAT_LIB)
+target/stage3.scm: target/stage2.scm main.ml prelude.scm $(SCHEME_COMPAT_LIB)
 	$(SCHEME_COMMAND) $< main.ml > target/tmp2.scm
 	cp target/tmp2.scm $@
 
 .PHONY: verify_bootstrapping
-verify_bootstrapping: target/compiled2.scm target/compiled.scm
+verify_bootstrapping: target/stage2.scm target/stage3.scm
 	diff $^
 	@printf "\x1b[32m""bootstrapping successful!""\x1b[m""\n"
 
