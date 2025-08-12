@@ -1869,6 +1869,10 @@ module Compile = struct
 
   type compile_target = | Scheme
 
+  let safe_in_scheme_identifiers = function
+    | '\'' -> false
+    | _    -> true
+
   let compile (target : compile_target) (decls : core) : string =
     let result = ref [] in
     let emit s = result := (s :: deref result) in
@@ -1924,8 +1928,8 @@ module Compile = struct
       let go_var (Binding (name, id, prov, _, _)) =
         match prov with
         | User ->
-          (* TODO: filter out quotes from the string name, then use it *)
-          "v" ^ string_of_int id
+          (* TODO: don't recompute this every time we have to compile a variable *)
+          "v" ^ String.filter safe_in_scheme_identifiers name ^ "-" ^ string_of_int id
         | Builtin prefix ->
           match name with
           | ";"  -> "miniml-semicolon"
