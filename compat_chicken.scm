@@ -2,7 +2,7 @@
 (import (chicken bitwise))         ; for (arithmetic-shift)
 #;
 (import (chicken port))
-(define (miniml-Miniml.argv ())
+(define (miniml-Miniml.argv _)
   (cons
     (program-name)
     (command-line-arguments)))
