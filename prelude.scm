@@ -124,6 +124,12 @@
                     (if (null? parts) parts
                         (cons sep parts)))))))))
 (define miniml-String.make (curry2 make-string))
+(define miniml-String.for-all
+  (lambda (p) (lambda (s)
+    (let loop ((i 0))
+      (or (= i (string-length s))
+          (and (p (string-ref s i))
+               (loop (+ 1 i)) ))))))
 
 (define (miniml-Fun.id x) x)
 (define miniml-Fun.flip

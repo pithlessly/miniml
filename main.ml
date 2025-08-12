@@ -1234,11 +1234,12 @@ module Elab = struct
         ()
       ));
       add_mod "String" (mk_ctx (fun add _ _ _ _ ->
-        add "length" [] (t_string --> t_int);
-        add "get"    [] (t_string --> (t_int --> t_char));
-        add "sub"    [] (t_string --> (t_int --> (t_int --> t_string)));
-        add "concat" [] (t_string --> (t_list t_string --> t_string));
-        add "make"   [] (t_int --> (t_char --> t_string));
+        add "length"  [] (t_string --> t_int);
+        add "get"     [] (t_string --> (t_int --> t_char));
+        add "sub"     [] (t_string --> (t_int --> (t_int --> t_string)));
+        add "concat"  [] (t_string --> (t_list t_string --> t_string));
+        add "make"    [] (t_int --> (t_char --> t_string));
+        add "for_all" [] ((t_char --> t_bool) --> (t_string --> t_bool));
         ()
       ));
       let t_void = ty0 "void" in
