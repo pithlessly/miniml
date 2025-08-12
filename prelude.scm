@@ -48,7 +48,7 @@
 (define (miniml-prerr_endline s)
   (display s (current-error-port))
   (display "\n" (current-error-port)))
-(define miniml-invalid_arg error)
+(define (miniml-invalid_arg msg) (error #f msg))
 (define miniml-exit        exit)
 (define (miniml-ref x)   (vector 'ref x))
 (define (miniml-deref r) (vector-ref r 1))
