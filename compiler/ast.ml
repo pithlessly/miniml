@@ -1,9 +1,10 @@
+type cvar = string * Token.span
 type typ = | TVar of string * Token.span
            | TCon of Common_syntax.mod_expr list * string * Token.span * typ list
-type pat      = (string * Token.span, string, typ) Common_syntax.pat
-type binding  = (string * Token.span, string, typ) Common_syntax.binding
-type bindings = (string * Token.span, string, typ) Common_syntax.bindings
-type expr     = (string * Token.span, string, typ) Common_syntax.expr
+type pat      = (string * Token.span, cvar, typ) Common_syntax.pat
+type binding  = (string * Token.span, cvar, typ) Common_syntax.binding
+type bindings = (string * Token.span, cvar, typ) Common_syntax.bindings
+type expr     = (string * Token.span, cvar, typ) Common_syntax.expr
 type typ_decl = | Datatype of (string * typ list) list
                 | Alias    of typ
 type decl     = | Let      of bindings

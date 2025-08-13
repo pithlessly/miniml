@@ -265,8 +265,8 @@ let ty_annot: typ option parser =
 
 let rec pattern3 : pat option parser = fun input k ->
   match input with
-  | KTrue        :: input -> k input (Some (PCon ("true", None)))
-  | KFalse       :: input -> k input (Some (PCon ("false", None)))
+  | KTrue        :: input -> k input (Some (PCon (("true", dummy_span), None)))
+  | KFalse       :: input -> k input (Some (PCon (("false", dummy_span), None)))
   | IdentUpper (mod_name, sp) :: Dot
                  :: input -> (* See NOTE "OpenIn" *)
                              force ("expected pattern " ^ describe_span sp) pattern3 input (fun input sub_pat ->
@@ -298,7 +298,7 @@ and pattern2 : pat option parser = fun input k ->
                  |                             _ -> false))
   with
   | (IdentUpper (constructor, sp) :: input, true) ->
-    (* TODO: use sp here *)
+    let constructor = (constructor, sp) in
     pattern3 input (fun input constructor_args_opt -> k input (
       (* See NOTE "constructor parsing hack" *)
       match constructor_args_opt with
@@ -332,7 +332,7 @@ and pattern1 : pat option parser = fun input k ->
     let result = resolve_precedence operands operators (
       function
       | "|"  -> (0, AssocLeft (fun a b -> POr (a, b)))
-      | "::" -> (1, AssocRight (fun a b -> PCon ("::", Some (a :: b :: []))))
+      | "::" -> (1, AssocRight (fun a b -> PCon (("::", dummy_span), Some (a :: b :: []))))
       | _    -> invalid_arg "impossible operator")
     in
     k input (Some result)))
@@ -487,7 +487,7 @@ and expr2 = fun input k ->
                  |                             _ -> false))
   with
   | (IdentUpper (constructor, sp) :: input, true) ->
-    (* TODO: use sp *)
+    let constructor = (constructor, sp) in
     expr3 input (fun input constructor_args_opt -> k input (
       (* NOTE "constructor parsing hack":
          The reader might be wondering: "isn't it hacky to detect
@@ -513,8 +513,8 @@ and expr2 = fun input k ->
       k input (Some applications)))
 and expr3 = fun input k ->
   match input with
-  | KTrue  :: input -> k input (Some (Con ("true", None)))
-  | KFalse :: input -> k input (Some (Con ("false", None)))
+  | KTrue  :: input -> k input (Some (Con (("true", dummy_span), None)))
+  | KFalse :: input -> k input (Some (Con (("false", dummy_span), None)))
   | IdentUpper (mod_name, _) :: Dot :: input ->
     (* TODO: care about spans *)
     (* NOTE "OpenIn": What we are dong here is desugaring
@@ -526,8 +526,8 @@ and expr3 = fun input k ->
     force "expected expression" expr3 input (fun input sub_expr ->
       k input (Some (OpenIn (MModule mod_name, sub_expr)))
     )
-  | IdentUpper (s, sp) (* TODO: use sp *)
-                 :: input -> k input (Some (Con (s, None))) (* duplicated from expr2 *)
+  | IdentUpper (s, sp)
+                 :: input -> k input (Some (Con ((s, sp), None))) (* duplicated from expr2 *)
   | TkCharLit c  :: input -> k input (Some (CharLit c))
   | TkIntLit i   :: input -> k input (Some (IntLit i))
   | TkStrLit s   :: input -> k input (Some (StrLit s))

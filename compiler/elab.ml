@@ -581,7 +581,8 @@ let elab () : string -> Ast.ast -> core m_result =
                             Ok p'
                           ) ps
         in Ok (PList ps', ground ty_elem)
-      | PCon (name, args) ->
+      | PCon ((name, sp), args) ->
+        (* TODO: use sp in errors *)
         let* (cv, param_tys, result_ty, args) =
           preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
                                       ctx name args
@@ -636,7 +637,8 @@ let elab () : string -> Ast.ast -> core m_result =
                           Ok e'
                         ) es
       in Ok (List es', ground ty_elem)
-    | Con (name, args) ->
+    | Con ((name, sp), args) ->
+      (* TODO: use sp in errors *)
       let* (cv, param_tys, result_ty, args) =
         preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
                                     ctx name args
