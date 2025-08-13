@@ -27,10 +27,10 @@ COMPILER_SOURCES := \
 	compiler/main.ml
 TARGET_SOURCES := $(patsubst compiler/%.ml,target/%.ml,$(COMPILER_SOURCES))
 
-$(TARGET_SOURCES): target/%.ml: compiler/%.ml target
+$(TARGET_SOURCES): target/%.ml: compiler/%.ml | target
 	cp $< $@
 
-target/ocamlshim.cmx: ocamlshim.ml target
+target/ocamlshim.cmx: ocamlshim.ml | target
 	$(OCAMLC) -o $@ -c $<
 
 target/stage1.exe: $(TARGET_SOURCES) target/ocamlshim.cmx
