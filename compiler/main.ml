@@ -170,7 +170,7 @@ module Lex = struct
     go 0 []
 end
 
-module CommonSyntax = struct
+module Common_syntax = struct
   type mod_expr = | MModule of string
   type ('var, 'con, 'ty) pat =
                                  | POr      of ('var, 'con, 'ty) pat
@@ -247,11 +247,11 @@ end
 
 module Ast = struct
   type typ = | TVar of string * Token.span
-             | TCon of CommonSyntax.mod_expr list * string * Token.span * typ list
-  type pat      = (string * Token.span, string, typ) CommonSyntax.pat
-  type binding  = (string * Token.span, string, typ) CommonSyntax.binding
-  type bindings = (string * Token.span, string, typ) CommonSyntax.bindings
-  type expr     = (string * Token.span, string, typ) CommonSyntax.expr
+             | TCon of Common_syntax.mod_expr list * string * Token.span * typ list
+  type pat      = (string * Token.span, string, typ) Common_syntax.pat
+  type binding  = (string * Token.span, string, typ) Common_syntax.binding
+  type bindings = (string * Token.span, string, typ) Common_syntax.bindings
+  type expr     = (string * Token.span, string, typ) Common_syntax.expr
   type typ_decl = | Datatype of (string * typ list) list
                   | Alias    of typ
   type decl     = | Let      of bindings
@@ -267,7 +267,7 @@ end
 module Parser = struct
 
   open Token
-  open CommonSyntax
+  open Common_syntax
   open Ast
 
   (* precedence walker *)
@@ -896,10 +896,10 @@ module Core = struct
                           * typ list  (* parameter types *)
                           * typ       (* return type *)
 
-  type pat      = (var, cvar, void) CommonSyntax.pat
-  type binding  = (var, cvar, void) CommonSyntax.binding
-  type bindings = (var, cvar, void) CommonSyntax.bindings
-  type expr     = (var, cvar, void) CommonSyntax.expr
+  type pat      = (var, cvar, void) Common_syntax.pat
+  type binding  = (var, cvar, void) Common_syntax.binding
+  type bindings = (var, cvar, void) Common_syntax.bindings
+  type expr     = (var, cvar, void) Common_syntax.expr
   type tydecl = | CDatatype of con * int (* arity *)
                 | CAlias    of con * int (* name and arity *)
                              * qvar list (* parameters *)
@@ -1003,7 +1003,7 @@ end
 
 module Elab = struct
 
-  open CommonSyntax
+  open Common_syntax
   open Core
 
   let show_ty : typ -> string =
@@ -1869,7 +1869,7 @@ end
 
 module Compile = struct
 
-  open CommonSyntax
+  open Common_syntax
   open Core
 
   type compile_target = | Scheme
