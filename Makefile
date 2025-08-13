@@ -13,7 +13,18 @@ default: target/stage2.scm
 target:
 	mkdir -p target
 
-COMPILER_SOURCES := compiler/main.ml
+COMPILER_SOURCES := \
+	compiler/util.ml          \
+	compiler/token.ml         \
+	compiler/common_syntax.ml \
+	compiler/ast.ml           \
+	compiler/core.ml          \
+	compiler/lex.ml           \
+	compiler/parser.ml        \
+	compiler/ctx.ml           \
+	compiler/elab.ml          \
+	compiler/compile.ml       \
+	compiler/main.ml
 TARGET_SOURCES := $(patsubst compiler/%.ml,target/%.ml,$(COMPILER_SOURCES))
 
 $(TARGET_SOURCES): target/%.ml: compiler/%.ml target
