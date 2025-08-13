@@ -21,6 +21,14 @@ let (>=) : int -> int -> bool = fun a b -> a >= b
 let (<)  : int -> int -> bool = fun a b -> a < b
 let (>)  : int -> int -> bool = fun a b -> a > b
 
+module String = struct
+  include String
+  let filter p s =
+    String.to_seq s
+    |> Seq.filter p
+    |> String.of_seq
+end
+
 module Option = struct
   let map = Option.map
   let unwrap = Option.get
@@ -72,6 +80,9 @@ module Miniml = struct
   let trace msg =
     if log_level < 2 then () else
       prerr_endline ("\x1b[33m(b trace)\x1b[m " ^ msg ())
+
+  let argv () =
+    Array.to_list Sys.argv
 end
 
 module Void : sig

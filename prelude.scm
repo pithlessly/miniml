@@ -48,7 +48,7 @@
 (define (miniml-prerr_endline s)
   (display s (current-error-port))
   (display "\n" (current-error-port)))
-(define miniml-invalid_arg error)
+(define (miniml-invalid_arg msg) (error #f msg))
 (define miniml-exit        exit)
 (define (miniml-ref x)   (vector 'ref x))
 (define (miniml-deref r) (vector-ref r 1))
@@ -124,6 +124,15 @@
                     (if (null? parts) parts
                         (cons sep parts)))))))))
 (define miniml-String.make (curry2 make-string))
+(define miniml-String.for_all
+  (lambda (p) (lambda (s)
+    (let loop ((i 0))
+      (or (= i (string-length s))
+          (and (p (string-ref s i))
+               (loop (+ 1 i)) ))))))
+(define miniml-String.filter
+  (lambda (p) (lambda (s)
+    (list->string (filter p (string->list s))))))
 
 (define (miniml-Fun.id x) x)
 (define miniml-Fun.flip

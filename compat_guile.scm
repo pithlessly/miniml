@@ -2,3 +2,5 @@
 (define arithmetic-shift         ash)
 (define bitwise-xor              logxor)
 (define bitwise-and              logand)
+(define miniml-program-args (command-line))
+(define (miniml-Miniml.argv _) miniml-program-args)
