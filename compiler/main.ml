@@ -2158,7 +2158,10 @@ let split_end (delim : char) (str : string) : (string * string) option =
       go (i - 1)
   in go (n - 1)
 
-let basename_and_extension (filename : string) : string * string =
+let basename_and_extension (path : string) : string * string =
+  let filename = match split_end '/' path with | None -> path
+                                               | Some (_, f) -> f
+  in
   match split_end '.' filename with
   | None -> (filename, "")
   (* a leading `.` is not considered to be part of a file extension *)

@@ -13,25 +13,28 @@ default: target/stage2.scm
 target:
 	mkdir -p target
 
-target/%.ml: %.ml target
+COMPILER_SOURCES := compiler/main.ml
+TARGET_SOURCES := $(patsubst compiler/%.ml,target/%.ml,$(COMPILER_SOURCES))
+
+$(TARGET_SOURCES): target/%.ml: compiler/%.ml target
 	cp $< $@
 
-target/%.cmx: target/%.ml
-	$(OCAMLC) -c $<
+target/ocamlshim.cmx: ocamlshim.ml target
+	$(OCAMLC) -o $@ -c $<
 
-target/stage1.exe: target/main.ml target/ocamlshim.cmx
-	$(OCAMLC) -o $@ -I target ocamlshim.cmx -open Ocamlshim $<
+target/stage1.exe: $(TARGET_SOURCES) target/ocamlshim.cmx
+	$(OCAMLC) -o $@ -I target ocamlshim.cmx -open Ocamlshim $(TARGET_SOURCES)
 
-target/stage2.scm: target/stage1.exe main.ml
-	$< main.ml > target/tmp2.scm
+target/stage2.scm: target/stage1.exe $(TARGET_SOURCES)
+	$< $(TARGET_SOURCES) >target/tmp2.scm
 	cp target/tmp2.scm $@
 
-target/stage3.scm: target/stage2.scm main.ml prelude.scm $(SCHEME_COMPAT_LIB)
-	$(SCHEME_COMMAND) $< main.ml > target/tmp3.scm
+target/stage3.scm: target/stage2.scm $(TARGET_SOURCES) prelude.scm $(SCHEME_COMPAT_LIB)
+	$(SCHEME_COMMAND) $< $(TARGET_SOURCES) >target/tmp3.scm
 	cp target/tmp3.scm $@
 
-target/stage4.scm: target/stage3.scm main.ml prelude.scm $(SCHEME_COMPAT_LIB)
-	$(SCHEME_COMMAND) $< main.ml > target/tmp4.scm
+target/stage4.scm: target/stage3.scm $(TARGET_SOURCES) prelude.scm $(SCHEME_COMPAT_LIB)
+	$(SCHEME_COMMAND) $< $(TARGET_SOURCES) >target/tmp4.scm
 	cp target/tmp4.scm $@
 
 .PHONY: verify_fixpoint
