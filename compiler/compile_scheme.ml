@@ -2,9 +2,58 @@ open Util
 open Common_syntax
 open Core
 
+let go_char c =
+  let code = int_of_char c in
+  if 32 < code && code < 128 then
+    "#\\" ^ String.make 1 c
+  else if c = ' ' then
+    "#\\space"
+  else if c = '\n' then
+    "#\\newline"
+  else if c = '\r' then
+    "(integer->char 13)"
+  else
+    invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
+and go_int = string_of_int
+and go_str s =
+  let rec go acc i =
+    if i < 0 then String.concat "" ("\"" :: acc) else
+    let c = match String.get s i with
+            | '"'  -> "\\\""
+            | '\\' -> "\\\\"
+            | '\n' -> "\\n"
+            | '\r' -> "\\r"
+            | c    -> let code = int_of_char c in
+                      if 32 <= code && code < 128 then
+                        String.make 1 c
+                      else
+                        invalid_arg ("we don't yet support this character code: "
+                                    ^ string_of_int code)
+    in go (c :: acc) (i - 1)
+  in go ("\"" :: []) (String.length s - 1)
+
 let safe_in_scheme_identifiers = function
   | '\'' -> false
   | _    -> true
+
+let go_var (Binding (name, id, prov, _, _)) =
+  match prov with
+  | User ->
+    (* TODO: don't recompute this every time we have to compile a variable *)
+    "v" ^ String.filter safe_in_scheme_identifiers name ^ "-" ^ string_of_int id
+  | Builtin prefix ->
+    match name with
+    | ";"  -> "miniml-semicolon"
+    | "::" -> "miniml-cons"
+    | _    -> "miniml-" ^ prefix ^ name
+
+let go_cvar (CBinding (name, id, prov, _, _, _)) =
+  match (prov, name) with
+  (* TODO: avoid special casing these constructors *)
+  | (Builtin "StringMap.", "DupErr")
+  | (Builtin "", ("Error" | "Ok")) -> "'" ^ name
+  | (User, _) -> "'" ^ name ^ string_of_int id
+  | _ -> invalid_arg "builtin constructors are handled specially"
 
 let scheme (decls : core) =
   let result = ref [] in
@@ -26,54 +75,6 @@ let scheme (decls : core) =
     let v = tmp_var () in
     emit_ln ("(define " ^ v ^ " " ^ expr ^ ")");
     v
-  in
-  let go_char c =
-    let code = int_of_char c in
-    if 32 < code && code < 128 then
-      "#\\" ^ String.make 1 c
-    else if c = ' ' then
-      "#\\space"
-    else if c = '\n' then
-      "#\\newline"
-    else if c = '\r' then
-      "(integer->char 13)"
-    else
-      invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
-  and go_int = string_of_int
-  and go_str s =
-    let rec go acc i =
-      if i < 0 then String.concat "" ("\"" :: acc) else
-      let c = match String.get s i with
-              | '"'  -> "\\\""
-              | '\\' -> "\\\\"
-              | '\n' -> "\\n"
-              | '\r' -> "\\r"
-              | c    -> let code = int_of_char c in
-                        if 32 <= code && code < 128 then
-                          String.make 1 c
-                        else
-                          invalid_arg ("we don't yet support this character code: "
-                                      ^ string_of_int code)
-      in go (c :: acc) (i - 1)
-    in go ("\"" :: []) (String.length s - 1)
-  in
-  let go_var (Binding (name, id, prov, _, _)) =
-    match prov with
-    | User ->
-      (* TODO: don't recompute this every time we have to compile a variable *)
-      "v" ^ String.filter safe_in_scheme_identifiers name ^ "-" ^ string_of_int id
-    | Builtin prefix ->
-      match name with
-      | ";"  -> "miniml-semicolon"
-      | "::" -> "miniml-cons"
-      | _    -> "miniml-" ^ prefix ^ name
-  and go_cvar (CBinding (name, id, prov, _, _, _)) =
-    match (prov, name) with
-    (* TODO: avoid special casing these constructors *)
-    | (Builtin "StringMap.", "DupErr")
-    | (Builtin "", ("Error" | "Ok")) -> "'" ^ name
-    | (User, _) -> "'" ^ name ^ string_of_int id
-    | _ -> invalid_arg "builtin constructors are handled specially"
   in
   let rec pat_local_vars : pat -> var list =
     function
