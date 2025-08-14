@@ -136,7 +136,7 @@
                (loop (+ 1 i)) ))))))
 (define miniml-String.filter
   (lambda (p) (lambda (s)
-    (list->string (filter p (string->list s))))))
+    (list->string (filter (string->list s) p)))))
 
 (define (miniml-Fun.id x) x)
 (define miniml-Fun.flip
