@@ -38,7 +38,16 @@ let module_name_from_filename : string -> string option =
 
 let () =
   match
-    let files : string list = drop_1 (Miniml.argv ()) in
+    let* (backend_name, (files : string list)) =
+      match Miniml.argv () with
+      | _ :: backend :: files -> Ok (backend, files)
+      | _                     -> Error "Usage: miniml BACKEND [FILES ...]"
+    in
+    let* backend =
+      match Compile.compile backend_name with
+      | Some backend -> Ok backend
+      | None -> Error ("No such backend: " ^ backend_name)
+    in
     let* (files : (string * string) list) =
       map_m error_monad (fun file_path ->
         match module_name_from_filename file_path with
@@ -72,8 +81,7 @@ let () =
         | Ok core -> Ok core
       ) files
     in
-    Ok (List.concat all_core)
+    Ok (backend (List.concat all_core))
   with
   | Error e -> (prerr_endline e; exit 1)
-  | Ok core ->
-      print_endline (Compile.(compile Scheme core))
+  | Ok result -> print_endline result
