@@ -433,8 +433,6 @@
 
 (define (int-hash i)
   (define mask32 #xffffffff)
-  (if (not (<= 0 i mask32))
-    (error "expected unsigned 32 bit integer") '())
   (define (*% a b) (bitwise-and mask32 (* a b)))
   ; 32bit->32bit hash taken from Murmur2_32
   (define seed #xc70f6907)
@@ -442,6 +440,8 @@
   (define len 4)
   (define h1 (bitwise-xor seed len))
   (define k1 i)
+  (if (not (<= 0 k1 mask32))
+    (error #f "expected unsigned 32 bit integer") '())
   (set! k1 (*% k1 m))
   (set! k1 (bitwise-xor k1 (arithmetic-shift k1 -24)))
   (set! k1 (*% k1 m))
