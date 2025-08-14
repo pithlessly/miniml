@@ -281,6 +281,15 @@ let initial_ctx
       add "disjoint_union" qa (t a --> (t a --> t_result (t a) (t_dup_err)));
       ()
     ));
+    add_mod "IntMap" (mk_ctx (fun add _ add_ty _ _ ->
+      let ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: []) in
+      let t = ty1 "t" in
+      add "empty"  qa (t a);
+      add "lookup" qa (t_int --> (t a --> t_option a));
+      add "insert" qa (t_int --> (a --> (t a --> t a)));
+      add "union"  qa (t a --> (t a --> t a));
+      ()
+    ));
     add_mod "Miniml" (mk_ctx (fun add _ _ _ _ ->
       add "log_level" [] t_int;
       add "debug" [] ((t_unit --> t_string) --> t_unit);

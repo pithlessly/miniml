@@ -1,5 +1,9 @@
 (define (curry2 f) (lambda (a) (lambda (b)             (f a b)   )))
 (define (curry3 f) (lambda (a) (lambda (b) (lambda (c) (f a b c)))))
+(define (any ls p) (let loop ((ls ls))
+                     (if (null? ls) #f (or (p (car ls)) (loop (cdr ls))))))
+(define (filter ls p) (let loop ((t '()) (ls ls))
+                        (if (null? ls) (reverse t) (loop (if (p (car ls)) (cons (car ls) t) t) (cdr ls)))))
 
 ; =================
 ; MiniML primitives
@@ -315,6 +319,39 @@
       (and (let loop ((l2rest l2)) (and (p (car l1) (car l2rest)) (loop (cdr l2rest))))
            (all-pairs p (cdr l1) l2))))
 
+(define (hashtrie-branch-cardinality b)
+  (cond ((null?   b) 0)
+        ((vector? b) 1)
+        ((pair?   b) (+ (hashtrie-branch-cardinality (car b))
+                        (hashtrie-branch-cardinality (cdr b))))))
+
+(define (hashtrie-union key-eql? m1 m2)
+  (define (collision-chain-union c1 c2)
+    (append c1 (filter c2 (lambda (e2)
+      (not (any c1 (lambda (e1) (key-eql? (ht-key  e1) (ht-key  e2)))))))))
+  (define tree (let loop ((lvl 32)
+                          (b1 (cdr m1))
+                          (b2 (cdr m2)))
+                 (define (loop-pair b1 b2) (cons (loop (- lvl 1) (car b1) (car b2))
+                                                 (loop (- lvl 1) (cdr b1) (cdr b2))))
+                 (define (develop entry) (if (even? (arithmetic-shift (ht-hash entry) (- lvl 32)))
+                                           (cons entry '())
+                                           (const '() entry)))
+                 (cond ((zero? lvl) (collision-chain-union b1 b2))
+                       ((null? b1)            b2)
+                       ((null? b2)            b1)
+                       ((and (pair? b1)
+                             (pair? b2))      (loop-pair b1 b2))
+                       ((pair? b1)            (loop-pair b1 (develop b2)))
+                       ((pair? b2)            (loop-pair (develop b1) b2))
+                       ((and (= (ht-hash b1)
+                                (ht-hash b2))
+                             (key-eql?
+                               (ht-key b1)
+                               (ht-key b2)))  b1)
+                       (#t                    (loop-pair (develop b1) (develop b2))))))
+  (cons (hashtrie-branch-cardinality tree) tree))
+
 (define (hashtrie-disjoint-union key-eql? duplicate-key m1 m2)
   (cons
     (+ (car m1) (car m2))
@@ -389,3 +426,37 @@
                   string=?
                   (lambda (dup-key) (k (vector 'Error (vector 'DupErr dup-key))))
                   m1 m2)))))))
+
+; =================================================
+; IntMap primitives implemented using the hash trie
+; =================================================
+
+(define (int-hash i)
+  (define mask32 #xffffffff)
+  (if (not (<= 0 i mask32))
+    (error "expected unsigned 32 bit integer") '())
+  (define (*% a b) (bitwise-and mask32 (* a b)))
+  ; 32bit->32bit hash taken from Murmur2_32
+  (define seed #xc70f6907)
+  (define m #x5bd1e995)
+  (define len 4)
+  (define h1 (bitwise-xor seed len))
+  (define k1 i)
+  (set! k1 (*% k1 m))
+  (set! k1 (bitwise-xor k1 (arithmetic-shift k1 -24)))
+  (set! k1 (*% k1 m))
+  (set! h1 (*% h1 m))
+  (set! h1 (bitwise-xor h1 k1))
+  (set! h1 (bitwise-xor h1 (arithmetic-shift h1 -13)))
+  (set! h1 (*% h1 m))
+  (set! h1 (bitwise-xor h1 (arithmetic-shift h1 -15)))
+  h1)
+
+(define miniml-IntMap.empty hashtrie-empty)
+(define miniml-IntMap.lookup (lambda (k) (lambda (m)
+  (define entry (hashtrie-lookup = (int-hash k) k m))
+  (if (null? entry) '() (list (ht-value entry))))))
+(define miniml-IntMap.insert (lambda (k) (lambda (v) (lambda (m)
+  (define new-map (hashtrie-insert = (int-hash k) k v m))
+  (if (null? new-map) m new-map)))))
+; (define (miniml-IntMap.union
