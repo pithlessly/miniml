@@ -76,19 +76,6 @@ let scheme (decls : core) =
     emit_ln ("(define " ^ v ^ " " ^ expr ^ ")");
     v
   in
-  let rec pat_local_vars : pat -> var list =
-    function
-    | POr (p, _)   -> pat_local_vars p (* will be the same in both branches *)
-    | PList ps
-    | PTuple ps    -> List.concat (List.map pat_local_vars ps)
-    | PCon (_, ps) -> List.concat (List.map pat_local_vars (Option.unwrap ps))
-    | PCharLit _ | PIntLit _ | PStrLit _
-    | PWild        -> []
-    | PVar v       -> v :: []
-    | POpenIn (_, _)
-                   -> invalid_arg "POpenIn should no longer be present in Core.pat"
-    | PAsc (_, vd) -> Void.absurd vd
-  in
   let rec go_pat : pat -> string =
     (* TODO: a lot of opportunities to generate more sensible/idiomatic code here *)
     function
@@ -198,7 +185,7 @@ let scheme (decls : core) =
       go_expr e
     | Match (scrutinee, branches) ->
       (
-        let locals = List.concat (List.map (fun (p, _) -> pat_local_vars p) branches) in
+        let locals = List.concat (List.map (fun (p, _) -> Elab.pat_local_vars p) branches) in
         emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals))
       );
       let scrutinee' = go_expr_impure scrutinee in
@@ -234,7 +221,7 @@ let scheme (decls : core) =
       let tv = tmp_var () in
       emit_ln ("(define " ^ tv ^ " (lambda (scrutinee)");
       indent 2 (fun () ->
-        let locals = pat_local_vars arg in
+        let locals = Elab.pat_local_vars arg in
         emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
         emit_ln ("(miniml-fun-guard " ^ go_pat arg ^ ")");
         emit_ln (go_expr_impure body ^ "))")
@@ -253,7 +240,7 @@ let scheme (decls : core) =
     fun e -> snd (go_expr e)
   and bindings (Bindings (_, bs)) =
     (* TODO: if the bindings aren't recursive, we can declare all these one binding a time *)
-    let locals = List.concat (List.map (fun (p, _, _, _) -> pat_local_vars p) bs) in
+    let locals = List.concat (List.map (fun (p, _, _, _) -> Elab.pat_local_vars p) bs) in
     emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
     emit_ln "(miniml-let-guard (and";
     indent 2 (fun () ->

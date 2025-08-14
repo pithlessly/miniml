@@ -872,3 +872,16 @@ let elab () : string -> Ast.ast -> core m_result =
     let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' ast in
     current_ctx := Ctx.(extend_mod ctx (CModule (module_name, new_layer)));
     Ok (List.concat inner_bindings)
+
+let rec pat_local_vars : pat -> var list =
+  function
+  | POr (p, _)   -> pat_local_vars p (* will be the same in both branches *)
+  | PList ps
+  | PTuple ps    -> List.concat (List.map pat_local_vars ps)
+  | PCon (_, ps) -> List.concat (List.map pat_local_vars (Option.unwrap ps))
+  | PCharLit _ | PIntLit _ | PStrLit _
+  | PWild        -> []
+  | PVar v       -> v :: []
+  | POpenIn (_, _)
+                 -> invalid_arg "POpenIn should no longer be present in Core.pat"
+  | PAsc (_, vd) -> Void.absurd vd
