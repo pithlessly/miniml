@@ -878,8 +878,8 @@ let rec pat_local_vars : pat -> var list =
   function
   | POr (p, _)   -> pat_local_vars p (* will be the same in both branches *)
   | PList ps
-  | PTuple ps    -> List.concat (List.map pat_local_vars ps)
-  | PCon (_, ps) -> List.concat (List.map pat_local_vars (Option.unwrap ps))
+  | PTuple ps    -> List.concat_map pat_local_vars ps
+  | PCon (_, ps) -> List.concat_map pat_local_vars (Option.unwrap ps)
   | PCharLit _ | PIntLit _ | PStrLit _
   | PWild        -> []
   | PVar v       -> v :: []

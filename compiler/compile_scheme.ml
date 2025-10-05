@@ -185,7 +185,7 @@ let scheme (decls : core) =
       go_expr e
     | Match (scrutinee, branches) ->
       (
-        let locals = List.concat (List.map (fun (p, _) -> Elab.pat_local_vars p) branches) in
+        let locals = List.concat_map (fun (p, _) -> Elab.pat_local_vars p) branches in
         emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals))
       );
       let scrutinee' = go_expr_impure scrutinee in
@@ -240,7 +240,7 @@ let scheme (decls : core) =
     fun e -> snd (go_expr e)
   and bindings (Bindings (_, bs)) =
     (* TODO: if the bindings aren't recursive, we can declare all these one binding a time *)
-    let locals = List.concat (List.map (fun (p, _, _, _) -> Elab.pat_local_vars p) bs) in
+    let locals = List.concat_map (fun (p, _, _, _) -> Elab.pat_local_vars p) bs in
     emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
     emit_ln "(miniml-let-guard (and";
     indent 2 (fun () ->
