@@ -221,6 +221,7 @@ let initial_ctx
       add "iter"       qa   ((a --> t_unit) --> (t_list a --> t_unit));
       add "length"     qa   (t_list a --> t_int);
       add "concat"     qa   (t_list (t_list a) --> t_list a);
+      add "concat_map" qab  ((a --> t_list b) --> (t_list a --> t_list b));
       ()
     ));
     add_mod "Char" (mk_ctx (fun add _ _ _ _ ->

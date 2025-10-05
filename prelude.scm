@@ -77,13 +77,13 @@
 ; Avoid using Scheme builtin map since it doesn't guarantee evaluation order.
 ; I didn't think this would be a problem, but Chez runs `f` on the elements
 ; in reverse order.
-(define miniml-List.map
-  (lambda (f) (lambda (xs)
-    (let loop ((acc '()) (xs xs))
-      (if (null? xs)
-        (reverse acc)
-        (let ((y (f (car xs))))
-          (loop (cons y acc) (cdr xs))))))))
+(define (miniml-map-in-order f xs)
+  (let loop ((acc '()) (xs xs))
+    (if (null? xs)
+      (reverse acc)
+      (let ((y (f (car xs))))
+        (loop (cons y acc) (cdr xs)) ))))
+(define miniml-List.map (curry2 miniml-map-in-order))
 (define miniml-List.map2
   (lambda (f) (lambda (xs) (lambda (ys)
     (let loop ((acc '()) (xs xs) (ys ys))
@@ -108,6 +108,10 @@
 (define miniml-List.iter   (curry2 for-each))
 (define miniml-List.length length)
 (define miniml-List.concat (lambda (xss) (apply append xss)))
+; there isn't really a better algorithm given our evaluation order constraint
+(define miniml-List.concat_map
+  (lambda (f) (lambda (xs)
+    (apply append (miniml-map-in-order f xs)) )))
 
 (define miniml-Char.<= (curry2 char<=?))
 (define miniml-Char.>= (curry2 char>=?))
