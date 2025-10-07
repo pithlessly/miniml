@@ -108,10 +108,20 @@
 (define miniml-List.iter   (curry2 for-each))
 (define miniml-List.length length)
 (define miniml-List.concat (lambda (xss) (apply append xss)))
-; there isn't really a better algorithm given our evaluation order constraint
 (define miniml-List.concat_map
   (lambda (f) (lambda (xs)
-    (apply append (miniml-map-in-order f xs)) )))
+    (define dummy-head (cons '() '()))
+    (define last dummy-head)
+    (for-each
+      (lambda (x)
+        (for-each
+          (lambda (y)
+            (define new-last (list y))
+            (set-cdr! last new-last)
+            (set! last new-last))
+          (f x)))
+      xs)
+    (cdr dummy-head) )))
 
 (define miniml-Char.<= (curry2 char<=?))
 (define miniml-Char.>= (curry2 char>=?))
