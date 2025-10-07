@@ -332,7 +332,13 @@ let preprocess_constructor_args
   in
   Ok (cv, param_tys, result_ty, args)
 
-let elab () : string -> Ast.ast -> core m_result =
+type elaborator
+  = (unit -> int) (* next_var_id *)
+  * (unit -> int) (* next_con_id *)
+    (* elaborate a module in the context of those already compiled *)
+  * (string -> Ast.ast -> core m_result)
+
+let new_elaborator () : elaborator =
   let next_var_id = counter ()
   and next_uvar_name = counter ()
   and next_con_id = counter ()
@@ -867,12 +873,17 @@ let elab () : string -> Ast.ast -> core m_result =
         ) decls ctx
   in
   let current_ctx = ref initial_ctx in
-  fun module_name ast ->
+  let elab_module module_name ast =
     let ctx = deref current_ctx in
     let ctx' = Ctx.extend_new_layer (deref current_ctx) in
     let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' ast in
     current_ctx := Ctx.(extend_mod ctx (CModule (module_name, new_layer)));
     Ok (List.concat inner_bindings)
+  in
+  (next_var_id, next_con_id, elab_module)
+
+let elab : elaborator -> string -> Ast.ast -> core m_result =
+  fun (_, _, elab_next) -> elab_next
 
 let rec pat_local_vars : pat -> var list =
   function
