@@ -55,7 +55,7 @@ let go_cvar (CBinding (name, id, prov, _, _, _)) =
   | (User, _) -> "'" ^ name ^ string_of_int id
   | _ -> invalid_arg "builtin constructors are handled specially"
 
-let scheme (decls : core) =
+let scheme (_ : Elab.elaborator) (decls : core) =
   let result = ref [] in
   let emit s = result := (s :: deref result) in
   let tmp_var =

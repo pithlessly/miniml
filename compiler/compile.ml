@@ -1,4 +1,4 @@
-type backend = Core.core -> string
+type backend = Elab.elaborator -> Core.core -> string
 
 let backends : backend StringMap.t ref =
   ref StringMap.empty

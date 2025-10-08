@@ -882,6 +882,9 @@ let new_elaborator () : elaborator =
   in
   (next_var_id, next_con_id, elab_module)
 
+let next_var_id : elaborator -> int =
+  fun (f, _, _) -> f ()
+
 let elab : elaborator -> string -> Ast.ast -> core m_result =
   fun (_, _, elab_next) -> elab_next
 

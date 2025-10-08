@@ -81,7 +81,7 @@ let () =
         | Ok core -> Ok core
       ) files
     in
-    Ok (backend (List.concat all_core))
+    Ok (backend elaborator (List.concat all_core))
   with
   | Error e -> (prerr_endline e; exit 1)
   | Ok result -> print_endline result
