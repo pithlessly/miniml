@@ -23,11 +23,18 @@ type cvar = | CBinding of string    (* name in the syntax *)
                         * qvar list (* forall parameters *)
                         * typ list  (* parameter types *)
                         * typ       (* return type *)
+(* field binding *)
+type field = | Field of string    (* name in the syntax *)
+                      * var_id    (* numeric ID *)
+                      * int       (* position in the record *)
+                      * qvar list (* forall parameters *)
+                      * typ       (* record type *)
+                      * typ       (* field type *)
 
-type pat      = (var, cvar, void) Common_syntax.pat
-type binding  = (var, cvar, void) Common_syntax.binding
-type bindings = (var, cvar, void) Common_syntax.bindings
-type expr     = (var, cvar, void) Common_syntax.expr
+type pat      = (var, cvar, field, void) Common_syntax.pat
+type binding  = (var, cvar, field, void) Common_syntax.binding
+type bindings = (var, cvar, field, void) Common_syntax.bindings
+type expr     = (var, cvar, field, void) Common_syntax.expr
 type tydecl = | CDatatype of con * int (* arity *)
               | CAlias    of con * int (* name and arity *)
                            * qvar list (* parameters *)
