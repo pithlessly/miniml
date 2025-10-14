@@ -212,7 +212,8 @@ let initial_ctx
     add_con "Ok"    qab (a :: []) (t_result a b);
     add_con "Error" qab (b :: []) (t_result a b);
     add_mod "List" (mk_ctx (fun add _ _ _ _ ->
-      add "rev" qa (t_list a --> t_list a);
+      add "init"       qa   (t_int --> ((t_int --> a) --> t_list a));
+      add "rev"        qa   (t_list a --> t_list a);
       add "fold_left"  qab  ((a --> (b --> a)) --> (a --> (t_list b --> a)));
       add "fold_right" qab  ((b --> (a --> a)) --> (t_list b --> (a --> a)));
       add "map"        qab  ((a --> b) --> (t_list a --> t_list b));

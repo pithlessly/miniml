@@ -59,6 +59,15 @@
 (define  miniml-:=       (lambda (r) (lambda (x) (vector-set! r 1 x))))
 (define miniml-cons      (curry2 cons))
 (define miniml-@         (curry2 append))
+(define miniml-List.init
+  (lambda (n) (lambda (f)
+    ; The most natural thing would be to build the list backwards, but
+    ; OCaml's List.init initializes the list in order, so to avoid
+    ; diverging in the order of side effects, we need to stick to that.
+    (let loop ((i 0) (acc '()))
+      (if (< i n)
+        (loop (add1 i) (cons (f i) acc))
+        (reverse acc) )))))
 (define miniml-List.rev reverse)
 (define miniml-List.fold_left
   (lambda (f) (lambda (acc) (lambda (xs)
