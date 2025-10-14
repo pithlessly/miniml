@@ -92,6 +92,8 @@ let lex str =
     | Some ')' -> adv CloseParen
     | Some '[' -> adv OpenBracket
     | Some ']' -> adv CloseBracket
+    | Some '{' -> adv OpenBrace
+    | Some '}' -> adv CloseBrace
     | Some ',' -> adv Comma
     | Some ';' -> adv Semicolon
     | Some c ->

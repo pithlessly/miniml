@@ -9,6 +9,8 @@ type token =
   | CloseParen
   | OpenBracket
   | CloseBracket
+  | OpenBrace
+  | CloseBrace
   | Dot
   | Colon
   | Comma
