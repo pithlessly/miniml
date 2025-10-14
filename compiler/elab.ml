@@ -475,6 +475,10 @@ let new_elaborator () : elaborator =
                           return_type)))
             ) ctx constructors
           in Ok (add_adts', add_aliases, add_conss')
+        | Ast.(Record []) ->
+          Error (E "empty records are not allowed")
+        | Ast.(Record fields) ->
+          invalid_arg "TODO: records"
         | Ast.(Alias ty) ->
           (* step 2 *)
           let add_aliases' ctx =

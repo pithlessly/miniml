@@ -5,7 +5,10 @@ type pat      = (string * Token.span, cvar, typ) Common_syntax.pat
 type binding  = (string * Token.span, cvar, typ) Common_syntax.binding
 type bindings = (string * Token.span, cvar, typ) Common_syntax.bindings
 type expr     = (string * Token.span, cvar, typ) Common_syntax.expr
+type record_decl
+              = (string * Token.span * typ) list
 type typ_decl = | Datatype of (string * typ list) list
+                | Record   of record_decl
                 | Alias    of typ
 type decl     = | Let      of bindings
                 | Types    of ( string list

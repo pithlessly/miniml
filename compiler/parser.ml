@@ -100,32 +100,38 @@ let dummy tok input = tok :: input
 (* helpers for parsing specific tokens *)
 
 let is_rec      : bool parser
-                = fun input k -> match input with | KRec    :: input -> k input true
-                                                  | _                -> k input false
+                = fun input k -> match input with | KRec      :: input -> k input true
+                                                  | _                  -> k input false
 and equal       : unit parser
-                = fun input k -> match input with | Equal   :: input -> k input ()
-                                                  | _                -> Error (E "expected '='")
+                = fun input k -> match input with | Equal     :: input -> k input ()
+                                                  | _                  -> Error (E "expected '='")
 and arrow       : unit parser
-                = fun input k -> match input with | Arrow   :: input -> k input ()
-                                                  | _                -> Error (E "expected '->'")
+                = fun input k -> match input with | Arrow     :: input -> k input ()
+                                                  | _                  -> Error (E "expected '->'")
+and colon       : unit parser
+                = fun input k -> match input with | Colon     :: input -> k input ()
+                                                  | _                  -> Error (E "expected ':'")
+and semicolon   : unit parser
+                = fun input k -> match input with | Semicolon :: input -> k input ()
+                                                  | _                -> Error (E "expected ':'")
 and k_struct    : unit parser
-                = fun input k -> match input with | KStruct :: input -> k input ()
-                                                  | _                -> Error (E "expected 'struct'")
+                = fun input k -> match input with | KStruct   :: input -> k input ()
+                                                  | _                  -> Error (E "expected 'struct'")
 and k_end       : unit parser
-                = fun input k -> match input with | KEnd    :: input -> k input ()
-                                                  | _                -> Error (E "expected 'end'")
+                = fun input k -> match input with | KEnd      :: input -> k input ()
+                                                  | _                  -> Error (E "expected 'end'")
 and k_in        : unit parser
-                = fun input k -> match input with | KIn     :: input -> k input ()
-                                                  | _                -> Error (E "expected 'in'")
+                = fun input k -> match input with | KIn       :: input -> k input ()
+                                                  | _                  -> Error (E "expected 'in'")
 and k_then      : unit parser
-                = fun input k -> match input with | KThen   :: input -> k input ()
-                                                  | _                -> Error (E "expected 'then'")
+                = fun input k -> match input with | KThen     :: input -> k input ()
+                                                  | _                  -> Error (E "expected 'then'")
 and k_else      : unit parser
-                = fun input k -> match input with | KElse   :: input -> k input ()
-                                                  | _                -> Error (E "expected 'else'")
+                = fun input k -> match input with | KElse     :: input -> k input ()
+                                                  | _                  -> Error (E "expected 'else'")
 and k_with      : unit parser
-                = fun input k -> match input with | KWith   :: input -> k input ()
-                                                  | _                -> Error (E "expected 'with'")
+                = fun input k -> match input with | KWith     :: input -> k input ()
+                                                  | _                  -> Error (E "expected 'with'")
 and ident_upper : (string * Token.span) parser
                 = fun input k -> match input with | IdentUpper (name, sp) :: input -> k input (name, sp)
                                                   | _                              -> Error (E "expected uppercase identifier")
@@ -216,6 +222,26 @@ and ty: typ parser =
       in k input ty_expr)
   in go input [] []
 
+let record_decl_after_open_brace : record_decl parser =
+  fun input k ->
+  let rec fields input fs =
+    match input with
+    | CloseBrace :: input -> k input (List.rev fs)
+    | IdentLower (s, sp) :: input ->
+        colon input (fun input () ->
+        ty input (fun input t ->
+        let fs = (s, sp, t) :: fs in
+        (* support both { a : int; } and { a : int } *)
+        match input with
+        | Semicolon :: CloseBrace :: input
+        | CloseBrace :: input ->
+          k input (List.rev fs)
+        | Semicolon :: input ->
+          fields input fs
+        | _ -> Error (E "expected ';' or '}' after record field")))
+    | _ -> Error (E "expected more record fields or end of record")
+  in fields input []
+
 let ty_decl: (string list * string * typ_decl) option parser =
   fun input k ->
   match input with
@@ -245,6 +271,9 @@ let ty_decl: (string list * string * typ_decl) option parser =
                     adt_constructors input ((c, []) :: cs)
                   | _ -> k input (Datatype (List.rev cs))
                 in adt_constructors input []
+              | OpenBrace :: input ->
+                record_decl_after_open_brace input
+                  (fun input record -> k input (Record record))
               | _ ->
                 ty input (fun input t -> k input (Alias t))
            ) @>
