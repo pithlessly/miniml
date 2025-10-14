@@ -487,7 +487,37 @@ let new_elaborator () : elaborator =
         | Ast.(Record []) ->
           Error (E "empty records are not allowed")
         | Ast.(Record fields) ->
-          invalid_arg "TODO: records"
+          (* we need to have the `con_info` immediately, but we don't actually want
+             to calculate the field types until later, so we initially make it empty *)
+          let fields_ref : field list ref = ref [] in
+          let con = make_con (CIRecord fields_ref) in
+          (* stage 1 *)
+          let add_adts ctx =
+            let* ctx = prev_add_adts ctx in
+            Ok (Ctx.extend_ty ctx (CNominal con))
+          in
+          (* stage 3 *)
+          let record_type = CTCon (con, List.map (fun qv -> CQVar qv) ty_params) in
+          let add_terms ctx =
+            let* ctx = prev_add_terms ctx in
+            let* (_, fields') =
+              map_m error_state_monad
+                    (fun (name, sp, ty) idx ->
+                      (* unlike with constructors, we are OK with shadowing of
+                         record fields *)
+                      let* field_ty = translate_ast_typ ctx tvs ty in
+                      Ok (idx + 1, Field (name,
+                                          next_var_id (),
+                                          idx,
+                                          ty_params,
+                                          record_type,
+                                          field_ty))
+                    ) fields 0
+            in
+            (* update things *)
+            fields_ref := fields';
+            Ok (List.fold_left Ctx.extend_fld ctx fields')
+          in Ok (add_adts, prev_add_aliases, add_terms)
         | Ast.(Alias ty) ->
           let con = make_con CIAlias in
           (* stage 2 *)

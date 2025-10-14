@@ -35,6 +35,7 @@ let update : (layer -> 'a -> layer) -> t -> 'a -> t =
   fun f (Ctx (top, parent)) x -> Ctx (f top x, parent)
 let extend     = update layer_extend
 let extend_con = update layer_extend_con
+let extend_fld = update layer_extend_fld
 let extend_ty  = update layer_extend_ty
 let extend_mod = update layer_extend_mod
 let extend_open_over : t -> string -> t option =

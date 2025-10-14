@@ -2,20 +2,9 @@ type level = int
 type var_id = int
 type qvar = | QVar of string * var_id
 type con_id = int
-type con_info =
-            | CIAlias
-            | CIDatatype
-type con  = | CCon of string
-                    * con_id
-                    * int (* arity *)
-                    * con_info
-type typ  = | CQVar of qvar
-            | CUVar of uvar ref
-            | CTCon of con * typ list
-and  uvar = | Unknown of string * var_id * level
-            | Known   of typ
-and  prov = | User
+type prov = | User
             | Builtin of string (* module prefix *)
+
 (* ordinary variable binding *)
 type var  = | Binding of string    (* name in the syntax *)
                        * var_id    (* numeric ID *)
@@ -23,19 +12,32 @@ type var  = | Binding of string    (* name in the syntax *)
                        * qvar list (* forall parameters *)
                        * typ       (* type *)
 (* constructor variable binding *)
-type cvar = | CBinding of string    (* name in the syntax *)
+and  cvar = | CBinding of string    (* name in the syntax *)
                         * var_id    (* numeric ID *)
                         * prov      (* user-defined or builtin? *)
                         * qvar list (* forall parameters *)
                         * typ list  (* parameter types *)
                         * typ       (* return type *)
 (* field binding *)
-type field = | Field of string    (* name in the syntax *)
+and  field = | Field of string    (* name in the syntax *)
                       * var_id    (* numeric ID *)
                       * int       (* position in the record *)
                       * qvar list (* forall parameters *)
                       * typ       (* record type *)
                       * typ       (* field type *)
+and  typ  = | CQVar of qvar
+            | CUVar of uvar ref
+            | CTCon of con * typ list
+and  uvar = | Unknown of string * var_id * level
+            | Known   of typ
+and  con  = | CCon of string
+                    * con_id
+                    * int (* arity *)
+                    * con_info
+and  con_info =
+            | CIAlias
+            | CIDatatype
+            | CIRecord of field list ref
 
 type pat      = (var, cvar, field, void) Common_syntax.pat
 type binding  = (var, cvar, field, void) Common_syntax.binding
