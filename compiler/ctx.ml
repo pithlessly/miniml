@@ -1,10 +1,11 @@
 type module_ = | CModule of string * layer
 and  layer =    Core.var list
            *   Core.cvar list
+           *  Core.field list
            * Core.tydecl list
            *     module_ list
 type t = | Ctx of layer * t option
-let empty_layer : layer = ([], [], [], [])
+let empty_layer : layer = ([], [], [], [], [])
 let find : (layer -> 'a list) -> ('a -> string) -> string -> t -> 'a option =
   fun get_list get_name name ->
     let rec go (Ctx (top, parent)) =
@@ -13,20 +14,23 @@ let find : (layer -> 'a list) -> ('a -> string) -> string -> t -> 'a option =
       | None   -> match parent with | None -> None
                                     | Some p -> go p
     in go
-let lookup     : string -> t ->    Core.var option = find (fun (vars, _, _, _) -> vars)
+let lookup     : string -> t ->    Core.var option = find (fun (vars, _, _, _, _) -> vars)
                                                           (fun Core.(Binding (name, _, _, _, _)) -> name)
-let lookup_con : string -> t ->   Core.cvar option = find (fun (_, cvars, _, _) -> cvars)
+let lookup_con : string -> t ->   Core.cvar option = find (fun (_, cvars, _, _, _) -> cvars)
                                                           (fun Core.(CBinding (name, _, _, _, _, _)) -> name)
-let lookup_ty  : string -> t -> Core.tydecl option = find (fun (_, _, cons, _) -> cons)
+let lookup_fld : string -> t ->  Core.field option = find (fun (_, _, fields, _, _) -> fields)
+                                                          (fun Core.(Field (name, _, _, _, _, _)) -> name)
+let lookup_ty  : string -> t -> Core.tydecl option = find (fun (_, _, _, cons, _) -> cons)
                                                           (fun Core.(CDatatype (CCon (name, _), _) |
                                                                      CAlias    (CCon (name, _), _, _, _)) -> name)
-let lookup_mod : string -> t ->     module_ option = find (fun (_, _, _, modules) -> modules)
+let lookup_mod : string -> t ->     module_ option = find (fun (_, _, _, _, modules) -> modules)
                                                           (fun (CModule (name, _)) -> name)
 
-let layer_extend     (vars, cvars, cons, modules) v   = (v :: vars, cvars, cons, modules)
-let layer_extend_con (vars, cvars, cons, modules) cv  = (vars, cv :: cvars, cons, modules)
-let layer_extend_ty  (vars, cvars, cons, modules) con = (vars, cvars, con :: cons, modules)
-let layer_extend_mod (vars, cvars, cons, modules) m   = (vars, cvars, cons, m :: modules)
+let layer_extend     (vars, cvars, fields, cons, modules) v   = (v :: vars, cvars, fields, cons, modules)
+let layer_extend_con (vars, cvars, fields, cons, modules) cv  = (vars, cv :: cvars, fields, cons, modules)
+let layer_extend_fld (vars, cvars, fields, cons, modules) f   = (vars, cvars, f :: fields, cons, modules)
+let layer_extend_ty  (vars, cvars, fields, cons, modules) con = (vars, cvars, fields, con :: cons, modules)
+let layer_extend_mod (vars, cvars, fields, cons, modules) m   = (vars, cvars, fields, cons, m :: modules)
 let update : (layer -> 'a -> layer) -> t -> 'a -> t =
   fun f (Ctx (top, parent)) x -> Ctx (f top x, parent)
 let extend     = update layer_extend
