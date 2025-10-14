@@ -546,6 +546,8 @@ and expr2 = fun input k ->
       let applications = List.fold_left (fun f x -> App (f, x)) head_exp arg_exps in
       k input (Some applications)))
 and expr3 = fun input k ->
+  expr4 input k
+and expr4 = fun input k ->
   match input with
   | KTrue  :: input -> k input (Some (Con (("true", dummy_span), None)))
   | KFalse :: input -> k input (Some (Con (("false", dummy_span), None)))
@@ -557,7 +559,7 @@ and expr3 = fun input k ->
        looks up non-existent identifiers in the enclosing scope, so:
            List.String.print_endline = print_endline
        *)
-    force "expected expression" expr3 input (fun input sub_expr ->
+    force "expected expression" expr4 input (fun input sub_expr ->
       k input (Some (OpenIn (MModule mod_name, sub_expr)))
     )
   | IdentUpper (s, sp)
