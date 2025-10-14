@@ -224,12 +224,17 @@ and ty: typ parser =
 
 let record_decl_after_open_brace : record_decl parser =
   fun input k ->
-  let rec fields input fs =
+  let rec fields input field_names fs =
     match input with
     | CloseBrace :: input -> k input (List.rev fs)
     | IdentLower (s, sp) :: input ->
         colon input (fun input () ->
         ty input (fun input t ->
+        let* field_names =
+          match StringMap.insert s () field_names with
+          | Some field_names -> Ok field_names
+          | None -> Error (E ("duplicate field name: " ^ s ^ " " ^ describe_span sp))
+        in
         let fs = (s, sp, t) :: fs in
         (* support both { a : int; } and { a : int } *)
         match input with
@@ -237,10 +242,10 @@ let record_decl_after_open_brace : record_decl parser =
         | CloseBrace :: input ->
           k input (List.rev fs)
         | Semicolon :: input ->
-          fields input fs
+          fields input field_names fs
         | _ -> Error (E "expected ';' or '}' after record field")))
     | _ -> Error (E "expected more record fields or end of record")
-  in fields input []
+  in fields input StringMap.empty []
 
 let ty_decl: (string list * string * typ_decl) option parser =
   fun input k ->
