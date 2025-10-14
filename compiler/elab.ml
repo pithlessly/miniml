@@ -13,18 +13,18 @@ let show_ty : typ -> string =
                   | Known ty -> go prec ty
                   | Unknown (s, _, lvl) ->
                     fun acc -> ("?" ^ s ^ "(" ^ string_of_int lvl ^ ")") :: acc)
-    | CTCon (CCon ("->", _), a :: b :: []) ->
+    | CTCon (CCon ("->", _, _, _), a :: b :: []) ->
       let a = go 1 a and b = go 0 b in
       wrap_if 0 (fun acc -> a (" -> " :: b acc))
-    | CTCon (CCon ("*", _), []) -> fun acc -> "unit" :: acc
-    | CTCon (CCon ("*", _), a :: args) ->
+    | CTCon (CCon ("*", _, _, _), []) -> fun acc -> "unit" :: acc
+    | CTCon (CCon ("*", _, _, _), a :: args) ->
       let a = go 2 a and args = List.map (go 2) args in
       wrap_if 1 (fun acc -> a (List.fold_right
                                 (fun arg acc -> " * " :: arg acc) args acc))
-    | CTCon (CCon (con, _), []) -> fun acc -> con :: acc
-    | CTCon (CCon (con, _), a :: []) ->
+    | CTCon (CCon (con, _, _, _), []) -> fun acc -> con :: acc
+    | CTCon (CCon (con, _, _, _), a :: []) ->
       let a = go 2 a in fun acc -> a (" " :: con :: acc)
-    | CTCon (CCon (con, _), a :: args) ->
+    | CTCon (CCon (con, _, _, _), a :: args) ->
       let a = go 0 a and args = List.map (go 0) args in
       fun acc -> "(" :: a (List.fold_right
                             (fun arg acc -> ", " :: arg acc)
@@ -105,7 +105,7 @@ let rec unify : typ -> typ -> unit m_result = fun t1 t2 ->
       let* () = occurs_check r t' in
       Ok (r := Known t')
   | (CTCon (c1, p1), CTCon (c2, p2)) ->
-    let (CCon (n1, id1)) = c1 and (CCon (n2, id2)) = c2 in
+    let (CCon (n1, id1, _, _)) = c1 and (CCon (n2, id2, _, _)) = c2 in
     if id1 <> id2 then
       Error (E ("cannot unify different type constructors: " ^ n1 ^ " != " ^ n2))
     else unify_all p1 p2
@@ -140,12 +140,13 @@ let initial_ctx
                (CBinding (name, next_var_id (), provenance, qvars, params, result))
     in
     let add_ty name arity =
-      let con = CCon (name, next_con_id ()) in
-      (ctx := Ctx.layer_extend_ty (deref ctx) (CDatatype (con, arity)); con)
+      let con = CCon (name, next_con_id (), arity, CIDatatype) in
+      (ctx := Ctx.layer_extend_ty (deref ctx) (CNominal con); con)
     in
     let add_alias name def =
-      let con = CCon (name, next_con_id ()) in
-      (ctx := Ctx.layer_extend_ty (deref ctx) (CAlias (con, 0, [], def)); def)
+      let arity = 0 in (* the stdlib only needs nullary aliases *)
+      let con = CCon (name, next_con_id (), arity, CIAlias) in
+      (ctx := Ctx.layer_extend_ty (deref ctx) (CAlias (con, [], def)); def)
     in
     let add_mod name m =
       ctx := Ctx.layer_extend_mod (deref ctx) Ctx.(CModule (name, m (prefix ^ name ^ ".")))
@@ -347,7 +348,8 @@ let new_elaborator () : elaborator =
   let (ty0, ty1, ty2) =
     let expect_arity n name =
       match Ctx.lookup_ty name initial_ctx with
-      | Some (CDatatype (c, arity)) ->
+      | Some (CNominal c) ->
+        let (CCon (_, _, arity, _)) = c in
         if arity = n then c
         else invalid_arg ("impossible: expected arity " ^ string_of_int n)
       | Some _ -> invalid_arg ("impossible: type " ^ name ^ " is not a datatype")
@@ -359,7 +361,7 @@ let new_elaborator () : elaborator =
   in
   let (-->)    = ty2 "->"
   and t_tuple  = match Ctx.lookup_ty "*" initial_ctx with
-                 | Some (CDatatype (c, _)) -> fun args -> CTCon (c, args)
+                 | Some (CNominal c) -> fun args -> CTCon (c, args)
                  | _ -> invalid_arg "impossible"
   and t_char   = ty0 "char"
   and t_int    = ty0 "int"
@@ -405,15 +407,16 @@ let new_elaborator () : elaborator =
         match Ctx.lookup_ty name ctx with
         | None -> Error (E ("type constructor not in scope: " ^ name))
         | Some decl ->
-          let (CDatatype (con, arity) | CAlias (con, arity, _, _)) = decl in
+          let (CNominal con | CAlias (con, _, _)) = decl in
+          let (CCon (_, _, arity, _)) = con in
           if arity <> List.length args && arity >= 0 then
             Error (E ("type constructor " ^ name ^ " " ^ Token.describe_span sp
                       ^ " expects " ^ string_of_int arity ^ " argument(s)"))
           else
             let* args' = map_m error_monad (go ctx) args in
             match decl with
-            | CDatatype (_, _) -> Ok (CTCon (con, args'))
-            | CAlias (_, _, params, definition) ->
+            | CNominal _ -> Ok (CTCon (con, args'))
+            | CAlias (_, params, definition) ->
               subst (List.map2 (fun p a -> (p, a)) params args') definition
     in go ctx
   in
@@ -443,17 +446,22 @@ let new_elaborator () : elaborator =
         in
         let tvs = tvs_from_map ty_params_map in
         let ty_params = List.map snd ty_params_qvs in
-        let* con = match Ctx.lookup_ty name ctx with
-                   | Some _ -> (* this check is not strictly necessary *)
-                               Error (E ("duplicate type name: " ^ name))
-                   | None   -> Ok (CCon (name, next_con_id ()))
+        (* check that this type constructor is not already in scope --
+           this is not strictly necessary *)
+        let* () = match Ctx.lookup_ty name ctx with
+                  | Some _ -> Error (E ("duplicate type name: " ^ name))
+                  | None   -> Ok ()
+        in
+        let make_con (info : con_info) : con =
+          CCon (name, next_con_id (), arity, info)
         in
         match decl with
         | Ast.(Datatype constructors) ->
+          let con = make_con CIDatatype in
           (* stage 1 *)
           let add_adts ctx =
             let* ctx = prev_add_adts ctx in
-            Ok (Ctx.extend_ty ctx (CDatatype (con, arity)))
+            Ok (Ctx.extend_ty ctx (CNominal con))
           in
           (* stage 3 *)
           let return_type = CTCon (con, List.map (fun qv -> CQVar qv) ty_params) in
@@ -480,13 +488,13 @@ let new_elaborator () : elaborator =
         | Ast.(Record fields) ->
           invalid_arg "TODO: records"
         | Ast.(Alias ty) ->
-          (* step 2 *)
+          let con = make_con CIAlias in
+          (* stage 2 *)
           let add_aliases ctx =
             let* ctx = prev_add_aliases ctx in
             let* ty' = translate_ast_typ ctx tvs ty in
             Ok (Ctx.extend_ty ctx (
               CAlias (con,
-                      arity,
                       ty_params,
                       ty')))
           in Ok (prev_add_adts, add_aliases, prev_add_terms)

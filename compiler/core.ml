@@ -2,7 +2,13 @@ type level = int
 type var_id = int
 type qvar = | QVar of string * var_id
 type con_id = int
-type con  = | CCon of string * con_id
+type con_info =
+            | CIAlias
+            | CIDatatype
+type con  = | CCon of string
+                    * con_id
+                    * int (* arity *)
+                    * con_info
 type typ  = | CQVar of qvar
             | CUVar of uvar ref
             | CTCon of con * typ list
@@ -35,8 +41,8 @@ type pat      = (var, cvar, field, void) Common_syntax.pat
 type binding  = (var, cvar, field, void) Common_syntax.binding
 type bindings = (var, cvar, field, void) Common_syntax.bindings
 type expr     = (var, cvar, field, void) Common_syntax.expr
-type tydecl = | CDatatype of con * int (* arity *)
-              | CAlias    of con * int (* name and arity *)
+type tydecl = | CNominal  of con
+              | CAlias    of con
                            * qvar list (* parameters *)
                            * typ       (* definition *)
 type core = bindings list
