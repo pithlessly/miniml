@@ -424,12 +424,12 @@ let new_elaborator () : elaborator =
        - extend the context with all the *declarations* of ADTs simultaneously;
        - traverse the type aliases serially, processing each's body in the
          current context and then extending the context;
-       - extend the context with the constructors of all ADTs. *)
+       - extend the context with new term-level things (constructors & fields). *)
     fun decls ctx ->
     let* ((add_adts    : Ctx.t -> Ctx.t m_result),
           (add_aliases : Ctx.t -> Ctx.t m_result),
-          (add_conss   : Ctx.t -> Ctx.t m_result))
-    = fold_left_m error_monad (fun (add_adts, add_aliases, add_conss)
+          (add_terms   : Ctx.t -> Ctx.t m_result))
+    = fold_left_m error_monad (fun (prev_add_adts, prev_add_aliases, prev_add_terms)
                                    (ty_params, name, decl) ->
         let arity = List.length ty_params in
         let ty_params_qvs = List.map (fun s -> (s, QVar (s, next_var_id ()))) ty_params in
@@ -450,15 +450,15 @@ let new_elaborator () : elaborator =
         in
         match decl with
         | Ast.(Datatype constructors) ->
-          (* step 1 *)
-          let add_adts' ctx =
-            let* ctx = add_adts ctx in
+          (* stage 1 *)
+          let add_adts ctx =
+            let* ctx = prev_add_adts ctx in
             Ok (Ctx.extend_ty ctx (CDatatype (con, arity)))
           in
-          (* step 3 *)
+          (* stage 3 *)
           let return_type = CTCon (con, List.map (fun qv -> CQVar qv) ty_params) in
-          let add_conss' ctx =
-            let* ctx = add_conss ctx in
+          let add_terms ctx =
+            let* ctx = prev_add_terms ctx in
             fold_left_m error_monad (fun ctx (name, param_tys) ->
               let* () = match Ctx.lookup_con name ctx with
                         | Some _ -> (* we don't yet know how to disambiguate *)
@@ -474,25 +474,25 @@ let new_elaborator () : elaborator =
                           param_tys',
                           return_type)))
             ) ctx constructors
-          in Ok (add_adts', add_aliases, add_conss')
+          in Ok (add_adts, prev_add_aliases, add_terms)
         | Ast.(Record []) ->
           Error (E "empty records are not allowed")
         | Ast.(Record fields) ->
           invalid_arg "TODO: records"
         | Ast.(Alias ty) ->
           (* step 2 *)
-          let add_aliases' ctx =
-            let* ctx = add_aliases ctx in
+          let add_aliases ctx =
+            let* ctx = prev_add_aliases ctx in
             let* ty' = translate_ast_typ ctx tvs ty in
             Ok (Ctx.extend_ty ctx (
               CAlias (con,
                       arity,
                       ty_params,
                       ty')))
-          in Ok (add_adts, add_aliases', add_conss)
+          in Ok (prev_add_adts, add_aliases, prev_add_terms)
       ) ((fun c -> Ok c), (fun c -> Ok c), (fun c -> Ok c)) decls
     in
-    add_adts ctx >>= add_aliases >>= add_conss
+    add_adts ctx >>= add_aliases >>= add_terms
   in
   let generalize (lvl : level) : typ list -> qvar list * typ list =
     (* TODO: we don't need to return a new type list here *)
