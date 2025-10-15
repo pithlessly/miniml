@@ -743,6 +743,8 @@ let new_elaborator () : elaborator =
                   let* () = unify ty (instantiate record_ty) in
                   let result_ty = instantiate result_ty in
                   Ok (Project (e', field), result_ty))
+    | MkRecord _ ->
+      invalid_arg "TODO: MkRecord"
     | App (e1, e2) ->
       let* (e1', ty_fun) = infer lvl ctx e1 in
       let* (e2', ty_arg) = infer lvl ctx e2 in

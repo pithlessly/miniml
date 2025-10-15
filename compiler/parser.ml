@@ -597,6 +597,32 @@ and expr5 = fun input k ->
   | OpenBracket :: CloseBracket
                  :: input -> k input (Some (List []))
   | OpenBracket  :: _     -> Error (E "only empty list literals are supported")
+  | OpenBrace    :: input ->
+    let rec start () = continue input StringMap.empty []
+    and finish input fs = k input (Some (MkRecord (List.rev fs)))
+    and continue input field_names fs =
+      match input with
+      | CloseBrace :: input -> finish input fs
+      | IdentLower (s, sp) :: Equal :: input ->
+          force_expr1 input (fun input expr ->
+          continue_after_field input field_names fs (s, sp) expr)
+      | IdentLower (s, sp) :: input ->
+          (* field punning *)
+          continue_after_field input field_names fs (s, sp) (Var (s, sp))
+    and continue_after_field input field_names fs field rhs =
+      let* field_names =
+        let (s, sp) = field in
+        match StringMap.insert s () field_names with
+        | Some field_names -> Ok field_names
+        | None -> Error (E ("duplicate field name in record expression: " ^ s ^ " " ^ describe_span sp))
+      in
+      let fs = (field, rhs) :: fs in
+      match input with
+      | CloseBrace :: input -> finish input fs
+      | Semicolon :: input -> continue input field_names fs
+      | _ -> Error (E "expected ';' or '}' after record field")
+    in
+    start ()
   | OpenParen :: KLet :: IdentSymbol (s, sp) :: CloseParen (* FIXME: span is slightly wrong *)
                  :: input -> k input (Some (Var ("let" ^ s, sp)))
   | OpenParen :: IdentSymbol (s, sp) :: CloseParen

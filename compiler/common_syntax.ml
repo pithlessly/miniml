@@ -36,6 +36,9 @@ and  ('var, 'con, 'fld, 'ty) expr =
                       * ('var, 'con, 'fld, 'ty) expr
         | Project    of ('var, 'con, 'fld, 'ty) expr
                       * 'fld
+        | MkRecord   of ('fld
+                      * ('var, 'con, 'fld, 'ty) expr
+                      ) list
         | App        of ('var, 'con, 'fld, 'ty) expr
                       * ('var, 'con, 'fld, 'ty) expr
         | LetIn      of ('var, 'con, 'fld, 'ty) bindings
