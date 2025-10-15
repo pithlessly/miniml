@@ -86,13 +86,14 @@ let ground : typ -> typ =
     List.iter (fun r -> r := Known ty) obligations;
     ty
 
+let unexpected_qvar (QVar (name, a)) =
+  E ("found CQVar (" ^ name ^ " " ^ string_of_int a ^ ") - should be impossible")
+
 let rec unify : typ -> typ -> unit m_result = fun t1 t2 ->
   (* FIXME: avoid physical equality on types? *)
   if t1 == t2 then Ok () else
   match (ground t1, ground t2) with
-  | (CQVar qv, _) | (_, CQVar qv) ->
-    let (QVar (name, a)) = qv in
-    Error (E ("found CQVar (" ^ name ^ " " ^ string_of_int a ^ ") - should be impossible"))
+  | (CQVar qv, _) | (_, CQVar qv) -> Error (unexpected_qvar qv)
   | (CUVar r, t') | (t', CUVar r) ->
     (* r must be Unknown *)
     if
@@ -720,6 +721,28 @@ let new_elaborator () : elaborator =
       match Ctx.extend_open_over ctx name with
       | Some ctx -> infer lvl ctx e
       | None     -> Error (E ("module not in scope: " ^ name)))
+    | Project (e, (field_name, _)) -> (
+      let* (e', ty) = infer lvl ctx e in
+      match ground ty with
+      | CQVar qv -> Error (unexpected_qvar qv)
+      | CUVar _  -> Error (E "cannot project out of expression of unknown type")
+      | CTCon (CCon (con_name, _, _, con_info), args) ->
+          match con_info with
+          | CIAlias    -> Error (E "should be impossible to find a type alias here?")
+          | CIDatatype -> Error (E "cannot project out of a datatype")
+          | CIRecord fields ->
+              match
+                List.find_opt (fun field_decl ->
+                  let (Field (name, _, _, _, _, _)) = field_decl in
+                  name = field_name) (deref fields)
+              with
+              | None -> Error (E ("record " ^ con_name ^ " has no field " ^ field_name))
+              | Some field ->
+                  let (Field (_, _, _, qvars, record_ty, result_ty)) = field in
+                  let instantiate = instantiate lvl qvars () in
+                  let* () = unify ty (instantiate record_ty) in
+                  let result_ty = instantiate result_ty in
+                  Ok (Project (e', field), result_ty))
     | App (e1, e2) ->
       let* (e1', ty_fun) = infer lvl ctx e1 in
       let* (e2', ty_arg) = infer lvl ctx e2 in
