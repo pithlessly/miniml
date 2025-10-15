@@ -37,6 +37,16 @@ let error_state_monad =
   and (>>=) g f = (fun s -> match g s with | Error e -> Error e | Ok (s, a) -> f a s)
   in (pure, (>>=))
 
+let writer_bind (monoid_op : 'w -> 'w -> 'w)
+  : 'w * 'a -> ('a -> 'w * 'b) -> 'w * 'b
+  = fun (w1, x) f ->
+      let (w2, y) = f x in
+      (monoid_op w1 w2, y)
+let writer_monad monoid_neu monoid_op =
+  let pure x = (monoid_neu, x)
+  and (>>=) = writer_bind monoid_op
+  in (pure, (>>=))
+
 let (>>=) x f = snd error_monad x f
 let (=<<) f x = (>>=) x f
 let (let*) x f = (>>=) x f
@@ -46,3 +56,17 @@ let counter () =
     let v = deref i in
     i := 1 + v;
     v)
+
+let string_flat_map : (char -> string) -> string -> string =
+  fun f s ->
+    let n = String.length s in
+    let rec go acc i =
+      if i < 0 then acc
+      else go (f (String.get s i) :: acc) (i - 1)
+    in String.concat "" (go [] (n - 1))
+
+let list_unwrap : 'a list -> 'a = function
+  | x :: [] -> x
+  | ls ->
+      let len = List.length ls in
+      invalid_arg ("expected singleton, but list has length" ^ string_of_int len)

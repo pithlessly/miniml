@@ -27,6 +27,7 @@ COMPILER_SOURCES := \
 	compiler/elab.ml           \
 	compiler/compile.ml        \
 	compiler/compile_scheme.ml \
+	compiler/compile_js.ml     \
 	compiler/main.ml
 TARGET_SOURCES := $(patsubst compiler/%.ml,target/%.ml,$(COMPILER_SOURCES))
 
