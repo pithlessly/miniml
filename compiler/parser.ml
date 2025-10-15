@@ -403,9 +403,9 @@ and pattern0 : pat parser = fun input k ->
 
 (* parsing expressions *)
 
-let rec expr0 : expr option parser = fun input k ->
-  expr0' expr1 input k
-and expr0' fallback : expr option parser = fun input k ->
+let rec expr1 : expr option parser = fun input k ->
+  expr1' expr2 input k
+and expr1' fallback : expr option parser = fun input k ->
   match input with
   | KLet :: IdentSymbol (s, sp) :: input ->
     (* FIXME: span is slightly wrong *)
@@ -476,8 +476,8 @@ and branch : (pat * expr) option parser = fun input k ->
       fin (fun pat () expr -> Some (pat, expr)))
     in p' input k
   | _ -> k input None
-and expr1 = fun input k ->
-  expr2 input (fun input first_operand_opt ->
+and expr2 = fun input k ->
+  expr3 input (fun input first_operand_opt ->
   match first_operand_opt with
   | None -> k input None
   | Some first_operand ->
@@ -485,7 +485,7 @@ and expr1 = fun input k ->
     let next_operand: ((string * span) * expr) option parser =
       fun input k ->
       let continue input s_and_sp =
-        force "expected expression" (expr0' expr2) input (fun input operand ->
+        force "expected expression" (expr1' expr3) input (fun input operand ->
         k input (Some (s_and_sp, operand)))
       in
       match input with
@@ -521,7 +521,7 @@ and expr1 = fun input k ->
                               ^ describe_span sp))
     in
     k input (Some result)))
-and expr2 = fun input k ->
+and expr3 = fun input k ->
   match (input, (match input with
                  | IdentUpper (_, _) :: Dot :: _ -> false
                  | IdentUpper (_, _)        :: _ -> true
@@ -529,7 +529,7 @@ and expr2 = fun input k ->
   with
   | (IdentUpper (constructor, sp) :: input, true) ->
     let constructor = (constructor, sp) in
-    expr3 input (fun input constructor_args_opt -> k input (
+    expr4 input (fun input constructor_args_opt -> k input (
       (* NOTE "constructor parsing hack":
          The reader might be wondering: "isn't it hacky to detect
          multi-argument constructors by just matching on whether the
@@ -545,22 +545,22 @@ and expr2 = fun input k ->
       | Some e            -> Some (Con (constructor, Some (e :: [])))
     ))
   | _ ->
-    expr3 input (fun input head_exp_opt ->
+    expr4 input (fun input head_exp_opt ->
     match head_exp_opt with
     | None -> k input None
     | Some head_exp ->
-      many expr3 input (fun input arg_exps ->
+      many expr4 input (fun input arg_exps ->
       let applications = List.fold_left (fun f x -> App (f, x)) head_exp arg_exps in
       k input (Some applications)))
-and expr3 = fun input k ->
-  expr4 input (fun input head_exp_opt ->
+and expr4 = fun input k ->
+  expr5 input (fun input head_exp_opt ->
   match head_exp_opt with
   | None -> k input None
   | Some head_exp ->
     many projection input (fun input projections ->
     let projected = List.fold_left (fun e fld -> Project (e, fld)) head_exp projections in
     k input (Some projected)))
-and expr4 = fun input k ->
+and expr5 = fun input k ->
   match input with
   | KTrue  :: input -> k input (Some (Con (("true", dummy_span), None)))
   | KFalse :: input -> k input (Some (Con (("false", dummy_span), None)))
@@ -572,11 +572,11 @@ and expr4 = fun input k ->
        looks up non-existent identifiers in the enclosing scope, so:
            List.String.print_endline = print_endline
        *)
-    force "expected expression" expr4 input (fun input sub_expr ->
+    force "expected expression" expr5 input (fun input sub_expr ->
       k input (Some (OpenIn (MModule mod_name, sub_expr)))
     )
   | IdentUpper (s, sp)
-                 :: input -> k input (Some (Con ((s, sp), None))) (* duplicated from expr2 *)
+                 :: input -> k input (Some (Con ((s, sp), None))) (* duplicated from expr3 *)
   | TkCharLit c  :: input -> k input (Some (CharLit c))
   | TkIntLit i   :: input -> k input (Some (IntLit i))
   | TkStrLit s   :: input -> k input (Some (StrLit s))
@@ -597,7 +597,7 @@ and expr4 = fun input k ->
     | CloseParen :: input -> k input (Some e)
     | _ -> Error (E "expected ')'"))
   | _ -> k input None
-and force_expr input k = force "Expected expression" expr0 input k
+and force_expr input k = force "Expected expression" expr1 input k
 and val_binding : binding option parser = fun input k ->
   match input with
   | KAnd :: input ->
