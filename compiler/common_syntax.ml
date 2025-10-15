@@ -34,6 +34,8 @@ and  ('var, 'con, 'fld, 'ty) expr =
         | Var        of 'var
         | OpenIn     of mod_expr
                       * ('var, 'con, 'fld, 'ty) expr
+        | Project    of ('var, 'con, 'fld, 'ty) expr
+                      * 'fld
         | App        of ('var, 'con, 'fld, 'ty) expr
                       * ('var, 'con, 'fld, 'ty) expr
         | LetIn      of ('var, 'con, 'fld, 'ty) bindings
