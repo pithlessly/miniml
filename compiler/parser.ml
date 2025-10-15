@@ -403,7 +403,22 @@ and pattern0 : pat parser = fun input k ->
 
 (* parsing expressions *)
 
-let rec expr1 : expr option parser = fun input k ->
+(* TODO: introduce a dedicated AST form for this *)
+let semicolon e1 e2 = App (App (Var (";", dummy_span),
+                                e1),
+                           e2)
+
+let rec expr0 : expr option parser = fun input k ->
+  expr1 input (fun input first_statement_opt ->
+  match first_statement_opt with
+  | None -> k input None
+  | Some first_statement ->
+    match input with
+    | Semicolon :: input ->
+      force_expr0 input (fun input rest ->
+      k input (Some (semicolon first_statement rest)))
+    | _ -> k input (Some first_statement))
+and expr1 : expr option parser = fun input k ->
   expr1' expr2 input k
 and expr1' fallback : expr option parser = fun input k ->
   match input with
@@ -412,9 +427,9 @@ and expr1' fallback : expr option parser = fun input k ->
     let p' =
       seq (force "expected pattern" pattern3 @>
            equal                             @>
-           force_expr                        @>
+           force_expr0                       @>
            k_in                              @>
-           force_expr                        @>
+           force_expr0                       @>
       fin (fun pat () rhs () rest -> Some (
         App (App (Var ("let" ^ s, sp), rhs),
              Fun (pat :: [], rest))
@@ -425,7 +440,7 @@ and expr1' fallback : expr option parser = fun input k ->
     let p' =
       seq (val_bindings  @>
            k_in          @>
-           force_expr    @>
+           force_expr0   @>
       fin (fun bindings () rest -> Some (
         LetIn (bindings, rest)
       )))
@@ -436,18 +451,18 @@ and expr1' fallback : expr option parser = fun input k ->
                       rather than   if true then 1 else (2; 3) = 1 *)
     (* FIXME: support omitting else? *)
     let p' =
-      seq (force_expr @>
-           k_then     @>
-           force_expr @>
-           k_else     @>
-           force_expr @>
+      seq (force_expr0 @>
+           k_then      @>
+           force_expr0 @>
+           k_else      @>
+           force_expr1 @>
       fin (fun condition_expr () then_expr () else_expr -> Some (
         IfThenElse (condition_expr, then_expr, else_expr)
       )))
     in p' input k
   | KMatch :: input ->
     let p' =
-      seq (force_expr  @>
+      seq (force_expr0 @>
            k_with      @>
            many branch @>
       fin (fun scrutinee () branches -> Some (
@@ -458,7 +473,7 @@ and expr1' fallback : expr option parser = fun input k ->
     let p' =
       seq (many pattern3 @>
            arrow         @>
-           force_expr    @>
+           force_expr0   @>
       fin (fun params () body -> Some (
         Fun (params, body)
       )))
@@ -470,9 +485,9 @@ and branch : (pat * expr) option parser = fun input k ->
   match input with
   | Pipe :: input ->
     let p' =
-      seq (pattern0   @>
-           arrow      @>
-           force_expr @>
+      seq (pattern0    @>
+           arrow       @>
+           force_expr0 @>
       fin (fun pat () expr -> Some (pat, expr)))
     in p' input k
   | _ -> k input None
@@ -492,9 +507,6 @@ and expr2 = fun input k ->
       | Comma               :: input -> continue input (",", dummy_span)
       | Equal               :: input -> continue input ("=", dummy_span)
       | IdentSymbol (s, sp) :: input -> continue input (s,   sp)
-      (* NOTE: we treat semicolon as only an operator because we don't
-         handle semicolons in list literals *)
-      | Semicolon           :: input -> continue input (";", dummy_span)
       | _                            -> k input None
     in
     many next_operand input (fun input (operands: ((string * span) * expr) list) ->
@@ -592,12 +604,13 @@ and expr5 = fun input k ->
   | OpenParen :: CloseParen
                  :: input -> k input (Some (Tuple []))
   | OpenParen    :: input ->
-    force_expr input (fun input e ->
+    force_expr0 input (fun input e ->
     match input with
     | CloseParen :: input -> k input (Some e)
     | _ -> Error (E "expected ')'"))
   | _ -> k input None
-and force_expr input k = force "Expected expression" expr1 input k
+and force_expr0 input k = force "Expected expression" expr0 input k
+and force_expr1 input k = force "Expected expression" expr1 input k
 and val_binding : binding option parser = fun input k ->
   match input with
   | KAnd :: input ->
@@ -606,7 +619,7 @@ and val_binding : binding option parser = fun input k ->
            many pattern3 @>
            ty_annot      @>
            equal         @>
-           force_expr    @>
+           force_expr0   @>
       fin (fun head_pat arg_pats annot () rhs -> Some (head_pat, arg_pats, annot, rhs)))
     in p' input k
   | _ -> k input None
