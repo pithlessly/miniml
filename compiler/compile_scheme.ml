@@ -169,6 +169,10 @@ let scheme (_ : Elab.elaborator) (decls : core) =
     | Var v -> (true, go_var v)
     | OpenIn (_, _) ->
       invalid_arg "OpenIn should no longer be present in Core.expr"
+    | Project (e, field) ->
+      let (Field (_, _, field_idx, _, _, _)) = field in
+      let (p, e') = go_expr e in
+      (p, "(vector-ref " ^ e' ^ " " ^ string_of_int field_idx ^ ")")
     | App (e1, e2) ->
       (false, (
         let (p1, e1') = go_expr e1 in
