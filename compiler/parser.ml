@@ -295,6 +295,13 @@ let ty_annot: typ option parser =
     ty input (fun input typ -> k input (Some typ))
   | _ -> k input None
 
+(* an optional projection *)
+let projection : field option parser =
+  fun input k ->
+  match input with
+  | Dot :: IdentLower (s, sp) :: input -> k input (Some (s, sp))
+  | _                                  -> k input None
+
 (* parsing patterns *)
 
 let rec pattern3 : pat option parser = fun input k ->
@@ -546,7 +553,13 @@ and expr2 = fun input k ->
       let applications = List.fold_left (fun f x -> App (f, x)) head_exp arg_exps in
       k input (Some applications)))
 and expr3 = fun input k ->
-  expr4 input k
+  expr4 input (fun input head_exp_opt ->
+  match head_exp_opt with
+  | None -> k input None
+  | Some head_exp ->
+    many projection input (fun input projections ->
+    let projected = List.fold_left (fun e fld -> Project (e, fld)) head_exp projections in
+    k input (Some projected)))
 and expr4 = fun input k ->
   match input with
   | KTrue  :: input -> k input (Some (Con (("true", dummy_span), None)))
