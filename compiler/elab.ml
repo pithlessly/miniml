@@ -11,7 +11,7 @@ let show_ty : typ -> string =
       if prec <= thresh then f else
       fun acc -> "(" :: f (")" :: acc) in
     match ty with
-    | CQVar (QVar (s, _)) -> fun acc -> "'" :: s :: acc
+    | CQVar qv -> fun acc -> "'" :: qv.name :: acc
     | CUVar r -> (match deref r with
                   | Known ty -> go prec ty
                   | Unknown (s, _, lvl) ->
@@ -96,8 +96,8 @@ let ground : typ -> typ =
     List.iter (fun r -> r := Known ty) obligations;
     ty
 
-let unexpected_qvar (QVar (name, a)) =
-  E ("found CQVar (" ^ name ^ " " ^ string_of_int a ^ ") - should be impossible")
+let unexpected_qvar (qv : qvar) =
+  E ("found CQVar (" ^ qv.name ^ " " ^ string_of_int qv.id ^ ") - should be impossible")
 
 let rec unify : typ -> typ -> unit m_result = fun t1 t2 ->
   (* FIXME: avoid physical equality on types? *)
@@ -144,16 +144,17 @@ type initial_ctx = {
 
 let initial_ctx
   (next_var_id : unit -> var_id)
+  (new_qvar    : string -> unit -> qvar)
   (next_con_id : unit -> con_id)
 : initial_ctx =
-  (* it's okay to reuse QVars for multiple variables here -
+  (* it's okay to reuse qvars for multiple variables here -
      they have the same ID, but this is only used to distinguish
      them during instantiation *)
-  let a = QVar ("a", next_var_id ()) in
+  let a = new_qvar "a" () in
   let qa  = a :: [] and a = CQVar a in
-  let b = QVar ("b", next_var_id ()) in
+  let b = new_qvar "b" () in
   let qab = b :: qa and b = CQVar b in
-  let c = QVar ("c", next_var_id ()) in
+  let c = new_qvar "c" () in
   let qabc = c :: qab and c = CQVar c in
   let rec mk_ctx callback prefix =
     let ctx = ref Ctx.empty_layer in
@@ -395,7 +396,8 @@ let new_elaborator () : elaborator =
   and next_uvar_name = counter ()
   and next_con_id = counter ()
   in
-  let initial_ctx = initial_ctx next_var_id next_con_id in
+  let new_qvar name () : qvar = { name; id = next_var_id () } in
+  let initial_ctx = initial_ctx next_var_id new_qvar next_con_id in
   let (-->)    = initial_ctx.types.t_func
   and t_tuple  = initial_ctx.types.t_tuple
   and t_char   = initial_ctx.types.t_char
@@ -425,13 +427,13 @@ let new_elaborator () : elaborator =
     Binding ("<anonymous>", next_var_id (), User, [], ty)
   in
   let translate_ast_typ ctx (tvs : tvs) : Ast.typ -> typ m_result =
-    (* substitute N types for N variables (QVars) in typ *)
+    (* substitute N types for N variables (qvars) in typ *)
     let rec subst (rho : (qvar * typ) list) typ =
       match ground typ with
-      | CQVar (QVar (name, id)) ->
-        (match List.find_opt (fun (QVar (_, id'), _) -> id = id') rho with
+      | CQVar qv ->
+        (match List.find_opt (fun ((qv' : qvar), _) -> qv.id = qv'.id) rho with
          | Some (_, ty) -> Ok ty
-         | None -> Error (E ("impossible: unknown qvar " ^ name ^ " while substituting")))
+         | None -> Error (E ("impossible: unknown qvar " ^ qv.name ^ " while substituting")))
       | CUVar _ -> Error (E "impossible: known types shouldn't have any unknown uvars?")
       | CTCon (c, args) ->
         let* args' = map_m error_monad (subst rho) args in
@@ -479,7 +481,7 @@ let new_elaborator () : elaborator =
     = fold_left_m error_monad (fun (prev_add_adts, prev_add_aliases, prev_add_terms)
                                    (ty_params, name, decl) ->
         let arity = List.length ty_params in
-        let ty_params_qvs = List.map (fun s -> (s, QVar (s, next_var_id ()))) ty_params in
+        let ty_params_qvs = List.map (fun s -> (s, new_qvar s ())) ty_params in
         let* (ty_params_map : typ StringMap.t) =
           fold_left_m error_monad (fun acc (s, qv) ->
             match StringMap.insert s (CQVar qv) acc with
@@ -589,7 +591,7 @@ let new_elaborator () : elaborator =
         | Known ty -> go ty qvars
         | Unknown (name, id, lvl') ->
           if lvl' > lvl then
-            let qv = QVar (name, next_var_id ()) in
+            let qv = new_qvar name () in
             let qvars = qv :: qvars in
             r := Known (CQVar qv);
             (qvars, CQVar qv)
@@ -600,13 +602,12 @@ let new_elaborator () : elaborator =
     in fun tys -> go_list tys []
   in
   let instantiate lvl (qvars : qvar list) () : typ -> typ =
-    let qvars = List.map (fun var -> let (QVar (name, _)) = var in
-                                     (var, new_uvar lvl (Some name) ())) qvars in
+    let qvars = List.map (fun (qv : qvar) -> (qv, new_uvar lvl (Some qv.name) ())) qvars in
     let rec go ty = match ty with
-                    | CQVar (QVar (n, id)) -> (
-                      match List.find_opt (fun (QVar (_, id'), _) -> id = id') qvars with
+                    | CQVar (qv : qvar) -> (
+                      match List.find_opt (fun ((qv' : qvar), _) -> qv.id = qv'.id) qvars with
                       | None -> new_uvar lvl (
-                                  Some ("<error: unexpected QVar here: " ^ n ^ ">")) ()
+                                  Some ("<error: unexpected qvar here: " ^ qv.name ^ ">")) ()
                       | Some (_, uv) -> uv)
                     | CUVar r -> (
                       match deref r with

@@ -1,6 +1,7 @@
 type level = int
 type var_id = int
-type qvar = | QVar of string * var_id
+type qvar = { name : string;
+              id : var_id }
 type con_id = int
 type prov = | User
             | Builtin of string (* module prefix *)
