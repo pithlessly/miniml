@@ -58,3 +58,37 @@ let list_remove : ('a -> bool) -> 'a list -> ('a * 'a list) option =
         else
           go (h :: acc) xs
     in go []
+
+let list_split_at : int -> 'a list -> 'a list * 'a list =
+  fun n xs ->
+    let rec go n acc xs =
+      if n > 0 then
+        match xs with
+        | [] -> invalid_arg "list is too long to split"
+        | x :: xs -> go (n - 1) (x :: acc) xs
+      else
+        (List.rev acc, xs)
+    in go n [] xs
+
+let list_merge (cmp : 'a -> 'a -> int) : 'a list -> 'a list -> 'a list =
+  let rec go xs ys =
+    match (xs, ys) with
+    | ([], _) -> ys
+    | (_, []) -> xs
+    | (x :: xs', y :: ys') ->
+        if cmp x y > 0 then
+          y :: go xs ys'
+        else
+          x :: go xs' ys
+  in go
+
+let list_sort (cmp : 'a -> 'a -> int) : 'a list -> 'a list =
+  let merge = list_merge cmp in
+  fun xs ->
+    let rec sort len xs =
+      if len <= 1 then xs else
+        let prefix_len = (len + 1) / 2 in
+        let suffix_len = len - prefix_len in
+        let (prefix, suffix) = list_split_at prefix_len xs in
+        merge (sort prefix_len prefix) (sort suffix_len suffix)
+    in sort (List.length xs) xs
