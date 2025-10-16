@@ -663,61 +663,75 @@ let new_elaborator () : elaborator =
           Binding (s, next_var_id (), User, [], new_uvar lvl (Some s) ())
         ) bindings)
   (* TODO: exhaustiveness checking? *)
-  and infer_pat_with_vars lvl tvs ctx (bindings : var StringMap.t) :
-                          Ast.pat -> (pat * typ) m_result =
-    let rec go ctx =
+  and infer_pat_with_vars_at lvl tvs ctx (bindings : var StringMap.t) :
+                             typ -> Ast.pat -> pat m_result =
+    let rec go ctx ty =
       function
-      | POr (p1, p2) -> let* (p1', ty1) = go ctx p1 in
-                        let* (p2', ty2) = go ctx p2 in
-                        let* () = unify ty1 ty2 in
-                        Ok (POr (p1', p2'), ty1)
+      | POr (p1, p2) -> let* p1' = go ctx ty p1 in
+                        let* p2' = go ctx ty p2 in
+                        Ok (POr (p1', p2'))
       | PTuple ps ->
-        let* ps' = map_m error_monad (go ctx) ps in
-        Ok (PTuple (List.map fst ps'),
-            t_tuple (List.map snd ps'))
+        let ps_and_types : (Ast.pat * typ) list = new_uvars lvl None ps () in
+        let* () = unify ty (t_tuple (List.map snd ps_and_types)) in
+        let* ps' = map_m error_monad (fun (p, ty) -> go ctx ty p) ps_and_types in
+        Ok (PTuple ps')
       | PList ps ->
         let ty_elem = new_uvar lvl None () in
-        let* ps' = map_m error_monad
-                          (fun p ->
-                            let* (p', ty_p) = go ctx p in
-                            let* () = unify ty_p ty_elem in
-                            Ok p'
-                          ) ps
-        in Ok (PList ps', t_list (ground ty_elem))
+        let* () = unify ty (t_list ty_elem) in
+        let* ps' = map_m error_monad (go ctx ty_elem) ps in
+        Ok (PList ps')
       | PCon (name, args) ->
-        let* (cv, param_tys, result_ty, args) =
-          preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
+        (* TODO: it is possible to use the result type to aid in name lookup *)
+        let* ((cv : cvar),
+              (param_tys : typ list),
+              (result_ty : typ),
+              (args : Ast.pat list))
+        = preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
                                       ctx name args
         in
-        let* args' = map_m error_monad (go ctx) args in
-        let* () = unify_all param_tys (List.map snd args') in
-        let args' = List.map fst args' in
-        Ok (PCon (cv, Some args'), ground result_ty)
-      | PCharLit c   -> Ok (PCharLit c, t_char)
-      | PIntLit c    -> Ok (PIntLit c, t_int)
-      | PStrLit c    -> Ok (PStrLit c, t_string)
+        (* TODO: perhaps change the signature of `preprocess_constructor_args`
+           so that this is an input instead of an output *)
+        let* () = unify result_ty ty in
+        let* args' = map2_m error_monad (go ctx) param_tys args in
+        Ok (PCon (cv, Some args'))
+      | PCharLit c   -> let* () = unify ty t_char   in Ok (PCharLit c)
+      | PIntLit c    -> let* () = unify ty t_int    in Ok (PIntLit c)
+      | PStrLit c    -> let* () = unify ty t_string in Ok (PStrLit c)
       | PVar (s, sp) -> (match StringMap.lookup s bindings with
                          | None   -> Error (err_sp ("unexpected variable in pattern: " ^ s) sp)
-                         | Some v -> let (Binding (_, _, _, _, ty)) = v in
-                                     Ok (PVar v, ty))
+                         | Some v -> let (Binding (_, _, _, qvars, ty_v)) = v in
+                                     let () = match qvars with
+                                              | [] -> ()
+                                              | _  -> invalid_arg "impossible: qvars should be empty here" in
+                                     let* () = unify ty_v ty in
+                                     Ok (PVar v))
       | POpenIn (MModule name, p)
                      -> (match Ctx.extend_open_over ctx name with
-                         | Some ctx -> go ctx p
+                         | Some ctx -> go ctx ty p
                          | None     -> Error (E ("module not in scope: " ^ name)))
-      | PAsc (p, ty) -> let* (p', ty1) = go ctx p in
-                        let* ty' = translate_ast_typ ctx tvs ty in
-                        let* () = unify ty1 ty' in
-                        Ok (p', ty')
-      | PWild        -> Ok (PWild, new_uvar lvl None ())
+      | PAsc (p, asc_ty)
+                     -> let* asc_ty' = translate_ast_typ ctx tvs asc_ty in
+                        let* () = unify ty asc_ty' in
+                        go ctx ty p
+      | PWild        -> Ok PWild
     in go ctx
   in
+  let infer_pat_with_vars lvl tvs ctx bindings pat : (pat * typ) m_result =
+    let ty = new_uvar lvl None () in
+    let* p' = infer_pat_with_vars_at lvl tvs ctx bindings ty pat in
+    Ok (p', ty)
+  in
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
-  let infer_pat lvl tvs : Ctx.t -> Ast.pat -> (Ctx.t * (pat * typ)) m_result =
-    fun ctx pat ->
+  let infer_pat_at lvl tvs ctx ty pat : (Ctx.t * pat) m_result =
     let* bindings = pat_bound_vars lvl pat in
-    let* pat' = infer_pat_with_vars lvl tvs ctx bindings pat in
+    let* pat' = infer_pat_with_vars_at lvl tvs ctx bindings ty pat in
     let ctx' = StringMap.fold (fun ctx _ v -> Ctx.extend ctx v) ctx bindings in
     Ok (ctx', pat')
+  in
+  let infer_pat lvl tvs ctx pat : (Ctx.t * (pat * typ)) m_result =
+    let ty = new_uvar lvl None () in
+    let* (ctx', p') = infer_pat_at lvl tvs ctx ty pat in
+    Ok (ctx', (p', ty))
   in
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
   let infer_pats lvl tvs : Ctx.t -> Ast.pat list -> (Ctx.t * (pat * typ) list) m_result =
