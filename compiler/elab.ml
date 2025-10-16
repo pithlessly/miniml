@@ -150,7 +150,7 @@ let initial_ctx
       (ctx := Ctx.layer_extend_ty (deref ctx) (CAlias (con, [], def)); def)
     in
     let add_mod name m =
-      ctx := Ctx.layer_extend_mod (deref ctx) Ctx.(CModule (name, m (prefix ^ name ^ ".")))
+      ctx := Ctx.layer_extend_mod (deref ctx) Ctx.{ name; layer = m (prefix ^ name ^ ".") }
     in
     (callback add add_con add_ty add_alias add_mod; deref ctx)
   in
@@ -982,7 +982,7 @@ let new_elaborator () : elaborator =
           | Ast.(Module (
               (name, sp), decls)) -> let ctx' = Ctx.extend_new_layer ctx in
                                      let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' decls in
-                                     let ctx = Ctx.(extend_mod ctx (CModule (name, new_layer))) in
+                                     let ctx = Ctx.extend_mod ctx Ctx.{ name; layer = new_layer } in
                                      (* TODO: use of List.concat here is not ideal for performance *)
                                      Ok (ctx, List.concat inner_bindings)
           | Ast.(Open (name, sp)) -> match Ctx.extend_open_under ctx name with
@@ -995,7 +995,7 @@ let new_elaborator () : elaborator =
     let ctx = deref current_ctx in
     let ctx' = Ctx.extend_new_layer (deref current_ctx) in
     let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' ast in
-    current_ctx := Ctx.(extend_mod ctx (CModule (module_name, new_layer)));
+    current_ctx := Ctx.extend_mod ctx Ctx.{ name = module_name; layer = new_layer };
     Ok (List.concat inner_bindings)
   in
   (next_var_id, next_con_id, elab_module)

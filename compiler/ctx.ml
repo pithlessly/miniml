@@ -1,4 +1,5 @@
-type module_ = | CModule of string * layer
+type module_ = { name : string ;
+                 layer : layer }
 and  layer =    Core.var list
            *   Core.cvar list
            *  Core.field list
@@ -24,7 +25,7 @@ let lookup_ty  : string -> t -> Core.tydecl option = find (fun (_, _, _, cons, _
                                                           (fun Core.(CNominal (CCon (name, _, _, _)) |
                                                                      CAlias   (CCon (name, _, _, _), _, _)) -> name)
 let lookup_mod : string -> t ->     module_ option = find (fun (_, _, _, _, modules) -> modules)
-                                                          (fun (CModule (name, _)) -> name)
+                                                          (fun (m : module_) -> m.name)
 
 let layer_extend     (vars, cvars, fields, cons, modules) v   = (v :: vars, cvars, fields, cons, modules)
 let layer_extend_con (vars, cvars, fields, cons, modules) cv  = (vars, cv :: cvars, fields, cons, modules)
@@ -40,12 +41,12 @@ let extend_ty  = update layer_extend_ty
 let extend_mod = update layer_extend_mod
 let extend_open_over : t -> string -> t option =
   fun ctx mod_name ->
-    Option.map (fun (CModule (_, layer)) -> Ctx (layer, Some ctx))
+    Option.map (fun (m : module_) -> Ctx (m.layer, Some ctx))
       (lookup_mod mod_name ctx)
 let extend_open_under : t -> string -> t option =
   fun ctx mod_name ->
     let (Ctx (top_layer, parent)) = ctx in
-    Option.map (fun (CModule (_, layer)) -> Ctx (top_layer, Some (Ctx (layer, parent))))
+    Option.map (fun (m : module_) -> Ctx (top_layer, Some (Ctx (m.layer, parent))))
       (lookup_mod mod_name ctx)
 let extend_new_layer : t -> t =
   fun ctx -> Ctx (empty_layer, Some ctx)
