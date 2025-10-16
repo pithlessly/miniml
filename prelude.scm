@@ -15,7 +15,7 @@
 (define miniml-+    (curry2 +))
 (define miniml--    (curry2 -))
 (define miniml-*    (curry2 *))
-(define miniml-/    (curry2 /))
+(define miniml-/    (curry2 quotient))
 
 (define miniml->= (curry2 >=))
 (define miniml-<= (curry2 <=))
