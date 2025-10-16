@@ -24,6 +24,17 @@ let fold_left_m
     | x :: xs -> f acc x >>= fun y -> go y xs
   in go
 
+(* FIXME: this is not the best implementation in the world *)
+let map2_m
+  (monad : ('c list -> 'c_list_m) *
+           ('c_m -> ('c -> 'c_list_m) -> 'c_list_m))
+  (f : 'a -> 'b -> 'c_m)
+  (xs : 'a list)
+  (ys : 'b list)
+  : 'c_list_m
+= let thunks : (unit -> 'c_m) list = List.map2 (fun x y () -> f x y) xs ys in
+  map_m monad (fun k -> k ()) thunks
+
 let state_monad =
   let pure a    = (fun s -> (s, a))
   and (>>=) g f = (fun s -> let (s, a) = g s in f a s)

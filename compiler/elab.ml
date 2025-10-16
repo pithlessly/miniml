@@ -700,28 +700,17 @@ let new_elaborator () : elaborator =
     fun expr -> match expr with
     | Tuple _
     | List _
+    | Con (_, _)
     | CharLit _
     | IntLit _
     | StrLit _
     | Var _
+    | OpenIn (_, _)
     | App (_, _)
     | LetIn (_, _)
     | Match (_, _)
     | IfThenElse (_, _, _)
       -> infer' lvl ctx expr
-    | Con (name, args) ->
-      let* (cv, param_tys, result_ty, args) =
-        preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
-                                    ctx name args
-      in
-      let* args' = map_m error_monad (infer lvl ctx) args in
-      let* () = unify_all param_tys (List.map snd args') in
-      let args' = List.map fst args' in
-      Ok (Con (cv, Some args'), ground result_ty)
-    | OpenIn (MModule name, e) -> (
-      match Ctx.extend_open_over ctx name with
-      | Some ctx -> infer lvl ctx e
-      | None     -> Error (E ("module not in scope: " ^ name)))
     | Project (e, (field_name, _)) -> (
       let* (e', ty) = infer lvl ctx e in
       match ground ty with
@@ -838,7 +827,20 @@ let new_elaborator () : elaborator =
       let* () = unify ty (t_list ty_elem) in
       let* es' = map_m error_monad (infer_at lvl ctx ty_elem) es in
       Ok (List es')
-    (* missing cases: Con *)
+    | Con (name, args) ->
+      (* TODO: it is possible to use the result type to aid in name lookup *)
+      let* ((cv : cvar),
+            (param_tys : typ list),
+            (result_ty : typ),
+            (args : Ast.expr list))
+      = preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
+                                    ctx name args
+      in
+      (* TODO: perhaps change the signature of `preprocess_constructor_args`
+         so that this is an input instead of an output *)
+      let* () = unify result_ty ty in
+      let* args' = map2_m error_monad (infer_at lvl ctx) param_tys args in
+      Ok (Con (cv, Some args'))
     | CharLit c -> let* () = unify ty t_char   in Ok (CharLit c)
     | IntLit i  -> let* () = unify ty t_int    in Ok (IntLit  i)
     | StrLit s  -> let* () = unify ty t_string in Ok (StrLit  s)
@@ -850,7 +852,11 @@ let new_elaborator () : elaborator =
         let ty_v = instantiate lvl qvars () ty_v in
         let* () = unify ty_v ty in
         Ok (Var v))
-    (* missing cases: OpenIn, Project, MkRecord *)
+    | OpenIn (MModule name, e) -> (
+      match Ctx.extend_open_over ctx name with
+      | Some ctx -> infer_at lvl ctx ty e
+      | None     -> Error (E ("module not in scope: " ^ name)))
+    (* missing cases: Project, MkRecord *)
     | App (e1, e2) ->
       let ty_arg = new_uvar lvl None () in
       let* e1' = infer_at lvl ctx (ty_arg --> ty) e1 in
