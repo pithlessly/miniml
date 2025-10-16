@@ -108,6 +108,20 @@
         (reverse acc)
         (let ((y ((f i) (car xs))))
           (loop (cons y acc) (+ i 1) (cdr xs))))))))
+(define miniml-List.filter
+  (lambda (p) (lambda (xs)
+    ; Avoid using Scheme builtin filter since it doesn't guarantee evaluation order.
+    ; I didn't think this would be a problem, but Chez runs `p` on the elements
+    ; in reverse order.
+    ; FIXME: not tail recursive.
+    (let loop ((xs xs))
+      (if (null? xs) xs
+        (let* ((head (car xs))
+               (keep (p head))
+               (rest (loop (cdr xs))))
+          (if keep
+            (cons head rest)
+            rest)))))))
 (define miniml-List.find_opt
   (lambda (p) (lambda (xs)
     (let loop ((xs xs))
