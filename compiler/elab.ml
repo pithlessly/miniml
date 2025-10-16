@@ -744,8 +744,57 @@ let new_elaborator () : elaborator =
                   let* () = unify ty (instantiate record_ty) in
                   let result_ty = instantiate result_ty in
                   Ok (Project (e', field), result_ty))
-    | MkRecord _ ->
-      invalid_arg "TODO: MkRecord"
+    | MkRecord [] -> Error (E "empty records are not allowed")
+    | MkRecord (((f1, sp1), rhs1) :: fs) ->
+      (* look up the first field in the context *)
+      let* field1 =
+        match Ctx.lookup_fld f1 ctx with
+        | Some field1 -> Ok field1
+        | None -> Error (E ("unknown record field: " ^ f1 ^ " " ^ Token.describe_span sp1))
+      in
+      (* type check the first field expression *)
+      let* (rhs1', field_ty) = infer lvl ctx rhs1 in
+      let* result_ty =
+        let (Field (_, _, _, qvars, record_ty, fld_ty)) = field1 in
+        let instantiate = instantiate lvl qvars () in
+        let* () = unify field_ty (instantiate fld_ty) in
+        Ok (instantiate record_ty)
+      in
+      (* get the full list of fields, minus the one we just found *)
+      let remove_field (name : string) : field list -> (field * field list) option =
+        list_remove (fun (Field (n, _, _, _, _, _)) -> n = name)
+      in
+      let (record_name, remaining_fields) =
+        match ground result_ty with
+        | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _) -> (
+          match deref fs_ref with
+          | [] -> invalid_arg "impossible: record cannot have empty list of fields"
+          | all_fields ->
+            match remove_field f1 all_fields with
+            | None -> invalid_arg "impossible: field is missing from record"
+            | Some (_, remaining_fields) -> (record_name, remaining_fields))
+        | _ -> invalid_arg "impossible: field's record_ty has invalid structure"
+      in
+      let rec visit_fields acc remaining_fields fs : (field * expr) list m_result =
+        match fs with
+        | [] -> (
+          match remaining_fields with
+          | [] -> Ok (List.rev acc)
+          | _  -> Error (E ("some fields are missing from record " ^ record_name)))
+        | ((f_name, sp), rhs) :: fs ->
+          match remove_field f_name remaining_fields with
+          | None -> Error (E ("record " ^ record_name ^ " has no field named " ^ f_name))
+          | Some (field, remaining_fields) ->
+            let* (rhs', field_ty) = infer lvl ctx rhs in
+            let (Field (_, _, _, qvars, record_ty, fld_ty)) = field in
+            let instantiate = instantiate lvl qvars () in
+            let* () = unify field_ty (instantiate fld_ty) in
+            let* () = unify result_ty (instantiate record_ty) in
+            let acc = (field, rhs') :: acc in
+            visit_fields acc remaining_fields fs
+      in
+      let* fields' = visit_fields ((field1, rhs1') :: []) remaining_fields fs in
+      Ok (MkRecord fields', result_ty)
     | App (e1, e2) ->
       let* (e1', ty_fun) = infer lvl ctx e1 in
       let* (e2', ty_arg) = infer lvl ctx e2 in

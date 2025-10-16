@@ -46,3 +46,15 @@ let counter () =
     let v = deref i in
     i := 1 + v;
     v)
+
+let list_remove : ('a -> bool) -> 'a list -> ('a * 'a list) option =
+  fun p ->
+    let rec go acc =
+      function
+      | [] -> None
+      | h :: xs ->
+        if p h then
+          Some (h, List.rev acc @ xs)
+        else
+          go (h :: acc) xs
+    in go []
