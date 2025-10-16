@@ -76,7 +76,7 @@ let () =
     let elaborator = Elab.new_elaborator () in
     let* (all_core : Core.core list) =
       map_m error_monad (fun (file_path, mod_name, ast) ->
-        match Elab.elab elaborator mod_name ast with
+        match elaborator.elab_module mod_name ast with
         | Error (E e) -> Error ("Type error: " ^ file_path ^ ": " ^ e)
         | Ok core -> Ok core
       ) files

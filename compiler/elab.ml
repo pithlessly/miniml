@@ -339,11 +339,12 @@ let preprocess_constructor_args
   in
   Ok (cv, param_tys, result_ty, args)
 
-type elaborator
-  = (unit -> int) (* next_var_id *)
-  * (unit -> int) (* next_con_id *)
-    (* elaborate a module in the context of those already compiled *)
-  * (string -> Ast.ast -> core m_result)
+type elaborator = {
+  next_var_id : unit -> var_id;
+  next_con_id : unit -> con_id;
+  (* elaborate a module in the context of those already compiled *)
+  elab_module : string -> Ast.ast -> core m_result;
+}
 
 let new_elaborator () : elaborator =
   let next_var_id = counter ()
@@ -1030,13 +1031,7 @@ let new_elaborator () : elaborator =
     };
     Ok (List.concat inner_bindings)
   in
-  (next_var_id, next_con_id, elab_module)
-
-let next_var_id : elaborator -> int =
-  fun (f, _, _) -> f ()
-
-let elab : elaborator -> string -> Ast.ast -> core m_result =
-  fun (_, _, elab_next) -> elab_next
+  { next_var_id; next_con_id; elab_module }
 
 let rec pat_local_vars : pat -> var list =
   function
