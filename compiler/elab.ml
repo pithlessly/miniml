@@ -307,11 +307,14 @@ let initial_ctx
 
 let preprocess_constructor_args
   (instantiate : qvar list -> unit -> typ -> typ)
-  (mk_tuple : 'a list -> 'a) ctx name (args : 'a list option)
-  : (cvar * typ list * typ * 'a list) m_result =
+  (mk_tuple : 'a list -> 'a)
+  (ctx : Ctx.t)
+  ((name, sp) : string * Token.span)
+  (args : 'a list option)
+: (cvar * typ list * typ * 'a list) m_result =
   let* cv =
     match Ctx.lookup_con name ctx with
-    | None    -> Error (E ("constructor not in scope: " ^ name))
+    | None    -> Error (E ("constructor not in scope: " ^ name ^ " " ^ Token.describe_span sp))
     | Some cv -> Ok cv
   in
   let (CBinding (_, _, _, qvars, param_tys, result_tys)) = cv in
@@ -652,8 +655,7 @@ let new_elaborator () : elaborator =
                             Ok p'
                           ) ps
         in Ok (PList ps', t_list (ground ty_elem))
-      | PCon ((name, sp), args) ->
-        (* TODO: use sp in errors *)
+      | PCon (name, args) ->
         let* (cv, param_tys, result_ty, args) =
           preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
                                       ctx name args
@@ -703,8 +705,7 @@ let new_elaborator () : elaborator =
     | App (_, _)
     | IfThenElse (_, _, _)
       -> infer' lvl ctx expr
-    | Con ((name, sp), args) ->
-      (* TODO: use sp in errors *)
+    | Con (name, args) ->
       let* (cv, param_tys, result_ty, args) =
         preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
                                     ctx name args
