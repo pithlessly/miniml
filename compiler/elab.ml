@@ -370,6 +370,7 @@ let new_elaborator () : elaborator =
   and t_int    = ty0 "int"
   and t_string = ty0 "string"
   and t_bool   = ty0 "bool"
+  and t_list   = ty1 "list"
   in
   let new_uvar lvl name () : typ =
     let id = next_uvar_name () in
@@ -641,7 +642,7 @@ let new_elaborator () : elaborator =
                             let* () = unify ty_p ty_elem in
                             Ok p'
                           ) ps
-        in Ok (PList ps', ground ty_elem)
+        in Ok (PList ps', t_list (ground ty_elem))
       | PCon ((name, sp), args) ->
         (* TODO: use sp in errors *)
         let* (cv, param_tys, result_ty, args) =
@@ -697,7 +698,7 @@ let new_elaborator () : elaborator =
                           let* () = unify ty_e ty_elem in
                           Ok e'
                         ) es
-      in Ok (List es', ground ty_elem)
+      in Ok (List es', t_list (ground ty_elem))
     | Con ((name, sp), args) ->
       (* TODO: use sp in errors *)
       let* (cv, param_tys, result_ty, args) =
