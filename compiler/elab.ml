@@ -35,19 +35,26 @@ let show_ty : typ -> string =
                             (") " :: con :: acc))
   in fun ty -> String.concat "" (go 0 ty [])
 
-type tvs = | TyvarScope of (string -> typ option)
-let tvs_lookup (TyvarScope f) s = f s
+(* A type variable scope, or tvs, is responsible for assigning each syntactic type variable
+   (just a string) to a type in the core (usually either a `CQVar` or `CUVar`).
+   This can work in one of two ways:
+   - A "static" type variable scope is used when we refer to type variables in a type declaration
+     and only supports a given set of type variables fixed in advance (the parameters).
+   - A "dynamic" type variable scope is used for processing type annotations inside terms, and
+     it dynamically generates a new type variable every time one with a new name is requested.
+ *)
+type tvs = { lookup : string -> typ option; }
 let tvs_from_map (m : typ StringMap.t) =
-  TyvarScope (fun s -> StringMap.lookup s m)
+  { lookup = fun s -> StringMap.lookup s m }
 let tvs_new_dynamic (new_ty : string -> typ) () =
   let cache = ref StringMap.empty in
-  TyvarScope (fun s ->
+  { lookup = fun s ->
     match StringMap.lookup s (deref cache) with
     | Some ty -> Some ty
     | None ->
       let ty = new_ty s in
       cache := Option.unwrap (StringMap.insert s ty (deref cache));
-      Some ty)
+      Some ty }
 
 let rec occurs_check (v : uvar ref) : typ -> unit m_result =
   function
@@ -417,7 +424,7 @@ let new_elaborator () : elaborator =
   let anon_var ty () : var =
     Binding ("<anonymous>", next_var_id (), User, [], ty)
   in
-  let translate_ast_typ ctx tvs : Ast.typ -> typ m_result =
+  let translate_ast_typ ctx (tvs : tvs) : Ast.typ -> typ m_result =
     (* substitute N types for N variables (QVars) in typ *)
     let rec subst (rho : (qvar * typ) list) typ =
       match ground typ with
@@ -433,7 +440,7 @@ let new_elaborator () : elaborator =
     let rec go ctx =
       function
       | Ast.(TVar (s, sp)) ->
-        (match tvs_lookup tvs s with
+        (match tvs.lookup s with
         | None -> Error (err_sp ("(impossible?) binding not found for tvar: " ^ s) sp)
         | Some ty -> Ok ty)
       | Ast.(TCon (MModule mod_name :: ms, name, sp, args)) ->
