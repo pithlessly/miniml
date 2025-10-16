@@ -2,6 +2,9 @@ open Util
 open Common_syntax
 open Core
 
+type span = Token.span
+let err_sp = Token.err_sp
+
 let show_ty : typ -> string =
   let rec go prec ty =
     let wrap_if thresh f =
@@ -343,12 +346,12 @@ let preprocess_constructor_args
   (instantiate : qvar list -> unit -> typ -> typ)
   (mk_tuple : 'a list -> 'a)
   (ctx : Ctx.t)
-  ((name, sp) : string * Token.span)
+  ((name, sp) : string * span)
   (args : 'a list option)
 : (cvar * typ list * typ * 'a list) m_result =
   let* cv =
     match Ctx.lookup_con name ctx with
-    | None    -> Error (E ("constructor not in scope: " ^ name ^ " " ^ Token.describe_span sp))
+    | None    -> Error (err_sp ("constructor not in scope: " ^ name) sp)
     | Some cv -> Ok cv
   in
   let (CBinding (_, _, _, qvars, param_tys, result_tys)) = cv in
@@ -431,8 +434,7 @@ let new_elaborator () : elaborator =
       function
       | Ast.(TVar (s, sp)) ->
         (match tvs_lookup tvs s with
-        | None -> Error (E ("(impossible?) binding not found for tvar: " ^ s
-                            ^ " " ^ Token.describe_span sp))
+        | None -> Error (err_sp ("(impossible?) binding not found for tvar: " ^ s) sp)
         | Some ty -> Ok ty)
       | Ast.(TCon (MModule mod_name :: ms, name, sp, args)) ->
         (match Ctx.extend_open_over ctx mod_name with
@@ -445,8 +447,8 @@ let new_elaborator () : elaborator =
           let (CNominal con | CAlias (con, _, _)) = decl in
           let (CCon (_, _, arity, _)) = con in
           if arity <> List.length args && arity >= 0 then
-            Error (E ("type constructor " ^ name ^ " " ^ Token.describe_span sp
-                      ^ " expects " ^ string_of_int arity ^ " argument(s)"))
+            Error (err_sp ("type constructor " ^ name ^ " expects "
+                            ^ string_of_int arity ^ " argument(s)") sp)
           else
             let* args' = map_m error_monad (go ctx) args in
             match decl with
@@ -687,8 +689,7 @@ let new_elaborator () : elaborator =
       | PIntLit c    -> Ok (PIntLit c, t_int)
       | PStrLit c    -> Ok (PStrLit c, t_string)
       | PVar (s, sp) -> (match StringMap.lookup s bindings with
-                         | None   -> Error (E ("unexpected variable in pattern: " ^ s
-                                               ^ " " ^ Token.describe_span sp))
+                         | None   -> Error (err_sp ("unexpected variable in pattern: " ^ s) sp)
                          | Some v -> let (Binding (_, _, _, _, ty)) = v in
                                      Ok (PVar v, ty))
       | POpenIn (MModule name, p)
@@ -793,7 +794,7 @@ let new_elaborator () : elaborator =
     | StrLit s  -> let* () = unify ty t_string in Ok (StrLit  s)
     | Var (s, sp) -> (
       match Ctx.lookup s ctx with
-      | None -> Error (E ("variable not in scope " ^ s ^ " " ^ Token.describe_span sp))
+      | None -> Error (err_sp ("variable not in scope " ^ s) sp)
       | Some v ->
         let (Binding (_, _, _, qvars, ty_v)) = v in
         let ty_v = instantiate lvl qvars () ty_v in
@@ -849,8 +850,7 @@ let new_elaborator () : elaborator =
             (* look up this field in the context *)
             let* field = match Ctx.lookup_fld field_name ctx with
                          | Some field -> Ok field
-                         | None -> Error (E (
-                              "unknown record field: " ^ field_name ^ " " ^ Token.describe_span sp))
+                         | None -> Error (err_sp ("unknown record field: " ^ field_name) sp)
             in
             let (Field (_, _, _, _, record_ty, _)) = field in
             match ground record_ty with

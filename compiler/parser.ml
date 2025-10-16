@@ -209,7 +209,7 @@ and ty: typ parser =
     | IdentSymbol ("*", _) :: input ->
       go input ty_operands ("*" :: ty_operators)
     | IdentSymbol (op, sp) :: _ ->
-      Error (E ("invalid type operator: " ^ op ^ " " ^ describe_span sp))
+      Error (err_sp ("invalid type operator: " ^ op) sp)
     | _ ->
       let ty_expr: typ =
         resolve_precedence
@@ -233,7 +233,7 @@ let record_decl_after_open_brace : record_decl parser =
         let* field_names =
           match StringMap.insert s () field_names with
           | Some field_names -> Ok field_names
-          | None -> Error (E ("duplicate field name: " ^ s ^ " " ^ describe_span sp))
+          | None -> Error (err_sp ("duplicate field name: " ^ s) sp)
         in
         let fs = (s, sp, t) :: fs in
         (* support both { a : int; } and { a : int } *)
@@ -363,8 +363,7 @@ and pattern1 : pat option parser = fun input k ->
       match input with
       | Pipe                  :: input -> continue input "|"
       | IdentSymbol ("::", _) :: input -> continue input "::"
-      | IdentSymbol (s, sp)   :: input -> Error (E ("invalid symbol in pattern: " ^ s
-                                                    ^ " " ^ describe_span sp))
+      | IdentSymbol (s, sp)   :: input -> Error (err_sp ("invalid symbol in pattern: " ^ s) sp)
       | _                              -> k input None
     in
     many next_operand input (fun input (operands: (string * pat) list) ->
@@ -614,7 +613,7 @@ and expr5 = fun input k ->
         let (s, sp) = field in
         match StringMap.insert s () field_names with
         | Some field_names -> Ok field_names
-        | None -> Error (E ("duplicate field name in record expression: " ^ s ^ " " ^ describe_span sp))
+        | None -> Error (err_sp ("duplicate field name in record expression: " ^ s) sp)
       in
       let fs = (field, rhs) :: fs in
       match input with

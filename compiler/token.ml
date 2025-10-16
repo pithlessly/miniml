@@ -4,6 +4,8 @@ let describe_span (sp : span) =
   if sp.line_no = 0 - 1 then "(dummy)"
   else "(near line " ^ string_of_int sp.line_no ^ ")"
 
+let err_sp msg sp = Util.(E (msg ^ " " ^ describe_span sp))
+
 type token =
   | OpenParen
   | CloseParen
