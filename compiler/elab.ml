@@ -380,6 +380,15 @@ let new_elaborator () : elaborator =
                | None   -> string_of_int id
     in CUVar (ref (Unknown (name, id, lvl)))
   in
+  let new_uvars lvl name (xs : 'a list) () : ('a * typ) list =
+    List.mapi (fun i x ->
+      let name = match name with
+                 | Some nm -> Some (nm ^ "[" ^ string_of_int i ^ "]")
+                 | None    -> None
+      in
+      (x, new_uvar lvl name ())
+    ) xs
+  in
   let anon_var ty () : var =
     Binding ("<anonymous>", next_var_id (), User, [], ty)
   in
@@ -692,13 +701,8 @@ let new_elaborator () : elaborator =
           t_tuple (List.map snd elab))
     | List es ->
       let ty_elem = new_uvar lvl None () in
-      let* es' = map_m error_monad
-                        (fun e ->
-                          let* (e', ty_e) = infer lvl ctx e in
-                          let* () = unify ty_e ty_elem in
-                          Ok e'
-                        ) es
-      in Ok (List es', t_list (ground ty_elem))
+      let* es' = map_m error_monad (infer_at lvl ctx ty_elem) es in
+      Ok (List es', t_list (ground ty_elem))
     | Con ((name, sp), args) ->
       (* TODO: use sp in errors *)
       let* (cv, param_tys, result_ty, args) =
@@ -797,10 +801,11 @@ let new_elaborator () : elaborator =
       let* fields' = visit_fields ((field1, rhs1') :: []) remaining_fields fs in
       Ok (MkRecord fields', result_ty)
     | App (e1, e2) ->
-      let* (e1', ty_fun) = infer lvl ctx e1 in
-      let* (e2', ty_arg) = infer lvl ctx e2 in
-      let ty_res = new_uvar lvl None () in
-      let* () = unify ty_fun (ty_arg --> ty_res) in
+      let ty_arg = new_uvar lvl None ()
+      and ty_res = new_uvar lvl None ()
+      in
+      let* e1' = infer_at lvl ctx (ty_arg --> ty_res) e1 in
+      let* e2' = infer_at lvl ctx ty_arg e2 in
       Ok (App (e1', e2'), ground ty_res)
     | LetIn (bindings, e) ->
       let* (ctx', bindings') = infer_bindings lvl ctx bindings in
@@ -858,6 +863,35 @@ let new_elaborator () : elaborator =
         Fun (PVar param :: [], Match (Var param, cases')),
         ground ty_arg --> ground ty_res
       )
+  and infer_at lvl ctx (ty : typ) : Ast.expr -> expr m_result =
+    function
+    | Tuple es ->
+      let es_and_types : (Ast.expr * typ) list = new_uvars lvl None es () in
+      let* () = unify ty (t_tuple (List.map snd es_and_types)) in
+      let* es' = map_m error_monad (fun (e, ty) -> infer_at lvl ctx ty e) es_and_types in
+      Ok (Tuple es')
+    | List es ->
+      let ty_elem = new_uvar lvl None () in
+      let* () = unify ty (t_list ty_elem) in
+      let* es' = map_m error_monad (infer_at lvl ctx ty_elem) es in
+      Ok (List es')
+    (* missing cases: Con, {Char,Int,Str}Lit, Var, OpenIn, Project, MkRecord *)
+    | App (e1, e2) ->
+      let ty_arg = new_uvar lvl None () in
+      let* e1' = infer_at lvl ctx (ty_arg --> ty) e1 in
+      let* e2' = infer_at lvl ctx ty_arg          e2 in
+      Ok (App (e1', e2'))
+    (* missing cases: LetIn, Match *)
+    | IfThenElse (e1, e2, e3) ->
+      let* e1' = infer_at lvl ctx t_bool e1 in
+      let* e2' = infer_at lvl ctx ty     e2 in
+      let* e3' = infer_at lvl ctx ty     e3 in
+      Ok (IfThenElse (e1', e2', e3'))
+    (* missing cases: Fun, Function *)
+    | expr ->
+      let* (e', e_ty) = infer lvl ctx expr in
+      let* () = unify ty e_ty in
+      Ok e'
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
   and infer_bindings lvl : Ctx.t -> Ast.bindings -> (Ctx.t * bindings) m_result =
     fun ctx (Bindings (is_rec, bindings)) ->
