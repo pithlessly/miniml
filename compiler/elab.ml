@@ -154,7 +154,7 @@ let initial_ctx
     in
     (callback add add_con add_ty add_alias add_mod; deref ctx)
   in
-  let top_level callback = Ctx.(Ctx (mk_ctx callback (* prefix: *) "", None)) in
+  let top_level callback = Ctx.{ top = mk_ctx callback (* prefix: *) ""; parent = None } in
   top_level (fun add add_con add_ty add_alias add_mod ->
     let ty0 name = CTCon (add_ty name 0, [])
     and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
@@ -970,6 +970,7 @@ let new_elaborator () : elaborator =
     )
   in
   (* TODO: enforce statically that this does not modify the parent of `ctx` *)
+  let ignore_all_but_the_top (ctx : Ctx.t) = ctx.top in
   let rec translate_decls ctx : Ast.decl list -> (Ctx.t * bindings list list) m_result =
     fun decls ->
     map_m error_state_monad
@@ -981,8 +982,11 @@ let new_elaborator () : elaborator =
                                      Ok (ctx, [])
           | Ast.(Module (
               (name, sp), decls)) -> let ctx' = Ctx.extend_new_layer ctx in
-                                     let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' decls in
-                                     let ctx = Ctx.extend_mod ctx Ctx.{ name; layer = new_layer } in
+                                     let* (ctx'', inner_bindings) = translate_decls ctx' decls in
+                                     let ctx = Ctx.extend_mod ctx Ctx.{
+                                       name;
+                                       layer = ignore_all_but_the_top ctx''
+                                     } in
                                      (* TODO: use of List.concat here is not ideal for performance *)
                                      Ok (ctx, List.concat inner_bindings)
           | Ast.(Open (name, sp)) -> match Ctx.extend_open_under ctx name with
@@ -994,8 +998,11 @@ let new_elaborator () : elaborator =
   let elab_module module_name ast =
     let ctx = deref current_ctx in
     let ctx' = Ctx.extend_new_layer (deref current_ctx) in
-    let* Ctx.(Ctx (new_layer, _), inner_bindings) = translate_decls ctx' ast in
-    current_ctx := Ctx.extend_mod ctx Ctx.{ name = module_name; layer = new_layer };
+    let* (ctx'', inner_bindings) = translate_decls ctx' ast in
+    current_ctx := Ctx.extend_mod ctx Ctx.{
+      name = module_name;
+      layer = ignore_all_but_the_top ctx''
+    };
     Ok (List.concat inner_bindings)
   in
   (next_var_id, next_con_id, elab_module)
