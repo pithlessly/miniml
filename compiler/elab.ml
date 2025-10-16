@@ -694,15 +694,15 @@ let new_elaborator () : elaborator =
     Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl tvs)))
   in
   let rec infer lvl ctx : Ast.expr -> (expr * typ) m_result =
-    function
-    | Tuple es ->
-      let* elab = map_m error_monad (infer lvl ctx) es in
-      Ok (Tuple (List.map fst elab),
-          t_tuple (List.map snd elab))
-    | List es ->
-      let ty_elem = new_uvar lvl None () in
-      let* es' = map_m error_monad (infer_at lvl ctx ty_elem) es in
-      Ok (List es', t_list (ground ty_elem))
+    fun expr -> match expr with
+    | Tuple _
+    | List _
+    | CharLit _
+    | IntLit _
+    | StrLit _
+    | App (_, _)
+    | IfThenElse (_, _, _)
+      -> infer' lvl ctx expr
     | Con ((name, sp), args) ->
       (* TODO: use sp in errors *)
       let* (cv, param_tys, result_ty, args) =
@@ -713,9 +713,6 @@ let new_elaborator () : elaborator =
       let* () = unify_all param_tys (List.map snd args') in
       let args' = List.map fst args' in
       Ok (Con (cv, Some args'), ground result_ty)
-    | CharLit c -> Ok (CharLit c, t_char)
-    | IntLit i -> Ok (IntLit i, t_int)
-    | StrLit s -> Ok (StrLit s, t_string)
     | Var (s, sp) ->
             (match Ctx.lookup s ctx with
             | None -> Error (E ("variable not in scope: " ^ s ^ " " ^ Token.describe_span sp))
@@ -800,13 +797,6 @@ let new_elaborator () : elaborator =
       in
       let* fields' = visit_fields ((field1, rhs1') :: []) remaining_fields fs in
       Ok (MkRecord fields', result_ty)
-    | App (e1, e2) ->
-      let ty_arg = new_uvar lvl None ()
-      and ty_res = new_uvar lvl None ()
-      in
-      let* e1' = infer_at lvl ctx (ty_arg --> ty_res) e1 in
-      let* e2' = infer_at lvl ctx ty_arg e2 in
-      Ok (App (e1', e2'), ground ty_res)
     | LetIn (bindings, e) ->
       let* (ctx', bindings') = infer_bindings lvl ctx bindings in
       let* (e', ty_e) = infer lvl ctx' e in
@@ -820,8 +810,7 @@ let new_elaborator () : elaborator =
             (fun (pat, e) ->
               let* (ctx', (pat', ty_pat)) = infer_pat lvl tvs ctx pat in
               let* ()                     = unify ty_pat ty_scrut in
-              let* (e', ty_e)             = infer lvl ctx' e      in
-              let* ()                     = unify ty_e ty_res     in
+              let* e'                     = infer_at lvl ctx' ty_res e in
               Ok (pat', e'))
             cases
       in
@@ -829,13 +818,6 @@ let new_elaborator () : elaborator =
         Match (e_scrut', cases'),
         ground ty_res
       )
-    | IfThenElse (e1, e2, e3) ->
-      let* (e1', ty_cond) = infer lvl ctx e1      in
-      let* ()             = unify ty_cond t_bool  in
-      let* (e2', ty_then) = infer lvl ctx e2      in
-      let* (e3', ty_else) = infer lvl ctx e3      in
-      let* ()             = unify ty_then ty_else in
-      Ok (IfThenElse (e1', e2', e3'), ground ty_then)
     | Fun (pats, e) ->
       let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
       let* (ctx', pats') = infer_pats lvl tvs ctx pats in
@@ -863,6 +845,10 @@ let new_elaborator () : elaborator =
         Fun (PVar param :: [], Match (Var param, cases')),
         ground ty_arg --> ground ty_res
       )
+  and infer' lvl ctx (e : Ast.expr) : (expr * typ) m_result =
+    let ty_res = new_uvar lvl None () in
+    let* e' = infer_at lvl ctx ty_res e in
+    Ok (e', ground ty_res)
   and infer_at lvl ctx (ty : typ) : Ast.expr -> expr m_result =
     function
     | Tuple es ->
@@ -875,7 +861,11 @@ let new_elaborator () : elaborator =
       let* () = unify ty (t_list ty_elem) in
       let* es' = map_m error_monad (infer_at lvl ctx ty_elem) es in
       Ok (List es')
-    (* missing cases: Con, {Char,Int,Str}Lit, Var, OpenIn, Project, MkRecord *)
+    (* missing cases: Con *)
+    | CharLit c -> let* () = unify ty t_char   in Ok (CharLit c)
+    | IntLit i  -> let* () = unify ty t_int    in Ok (IntLit  i)
+    | StrLit s  -> let* () = unify ty t_string in Ok (StrLit  s)
+    (* missing cases: Var, OpenIn, Project, MkRecord *)
     | App (e1, e2) ->
       let ty_arg = new_uvar lvl None () in
       let* e1' = infer_at lvl ctx (ty_arg --> ty) e1 in
