@@ -706,84 +706,13 @@ let new_elaborator () : elaborator =
     | StrLit _
     | Var _
     | OpenIn (_, _)
+    | Project (_, _)
+    | MkRecord _
     | App (_, _)
     | LetIn (_, _)
     | Match (_, _)
     | IfThenElse (_, _, _)
       -> infer' lvl ctx expr
-    | Project (e, (field_name, _)) -> (
-      let* (e', ty) = infer lvl ctx e in
-      match ground ty with
-      | CQVar qv -> Error (unexpected_qvar qv)
-      | CUVar _  -> Error (E "cannot project out of expression of unknown type")
-      | CTCon (CCon (con_name, _, _, con_info), args) ->
-          match con_info with
-          | CIAlias    -> Error (E "should be impossible to find a type alias here?")
-          | CIDatatype -> Error (E "cannot project out of a datatype")
-          | CIRecord fields ->
-              match
-                List.find_opt (fun field_decl ->
-                  let (Field (name, _, _, _, _, _)) = field_decl in
-                  name = field_name) (deref fields)
-              with
-              | None -> Error (E ("record " ^ con_name ^ " has no field " ^ field_name))
-              | Some field ->
-                  let (Field (_, _, _, qvars, record_ty, result_ty)) = field in
-                  let instantiate = instantiate lvl qvars () in
-                  let* () = unify ty (instantiate record_ty) in
-                  let result_ty = instantiate result_ty in
-                  Ok (Project (e', field), result_ty))
-    | MkRecord [] -> Error (E "empty records are not allowed")
-    | MkRecord (((f1, sp1), rhs1) :: fs) ->
-      (* look up the first field in the context *)
-      let* field1 =
-        match Ctx.lookup_fld f1 ctx with
-        | Some field1 -> Ok field1
-        | None -> Error (E ("unknown record field: " ^ f1 ^ " " ^ Token.describe_span sp1))
-      in
-      (* type check the first field expression *)
-      let* (rhs1', field_ty) = infer lvl ctx rhs1 in
-      let* result_ty =
-        let (Field (_, _, _, qvars, record_ty, fld_ty)) = field1 in
-        let instantiate = instantiate lvl qvars () in
-        let* () = unify field_ty (instantiate fld_ty) in
-        Ok (instantiate record_ty)
-      in
-      (* get the full list of fields, minus the one we just found *)
-      let remove_field (name : string) : field list -> (field * field list) option =
-        list_remove (fun (Field (n, _, _, _, _, _)) -> n = name)
-      in
-      let (record_name, remaining_fields) =
-        match ground result_ty with
-        | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _) -> (
-          match deref fs_ref with
-          | [] -> invalid_arg "impossible: record cannot have empty list of fields"
-          | all_fields ->
-            match remove_field f1 all_fields with
-            | None -> invalid_arg "impossible: field is missing from record"
-            | Some (_, remaining_fields) -> (record_name, remaining_fields))
-        | _ -> invalid_arg "impossible: field's record_ty has invalid structure"
-      in
-      let rec visit_fields acc remaining_fields fs : (field * expr) list m_result =
-        match fs with
-        | [] -> (
-          match remaining_fields with
-          | [] -> Ok (List.rev acc)
-          | _  -> Error (E ("some fields are missing from record " ^ record_name)))
-        | ((f_name, sp), rhs) :: fs ->
-          match remove_field f_name remaining_fields with
-          | None -> Error (E ("record " ^ record_name ^ " has no field named " ^ f_name))
-          | Some (field, remaining_fields) ->
-            let* (rhs', field_ty) = infer lvl ctx rhs in
-            let (Field (_, _, _, qvars, record_ty, fld_ty)) = field in
-            let instantiate = instantiate lvl qvars () in
-            let* () = unify field_ty (instantiate fld_ty) in
-            let* () = unify result_ty (instantiate record_ty) in
-            let acc = (field, rhs') :: acc in
-            visit_fields acc remaining_fields fs
-      in
-      let* fields' = visit_fields ((field1, rhs1') :: []) remaining_fields fs in
-      Ok (MkRecord fields', result_ty)
     | Fun (pats, e) ->
       let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
       let* (ctx', pats') = infer_pats lvl tvs ctx pats in
@@ -856,7 +785,88 @@ let new_elaborator () : elaborator =
       match Ctx.extend_open_over ctx name with
       | Some ctx -> infer_at lvl ctx ty e
       | None     -> Error (E ("module not in scope: " ^ name)))
-    (* missing cases: Project, MkRecord *)
+    | Project (e, (field_name, _)) ->
+      let* (e', e_ty) = infer' lvl ctx e in
+      let* (con_name, fields, args) =
+        match ground e_ty with
+        | CQVar qv -> Error (unexpected_qvar qv)
+        | CUVar _  -> Error (E "cannot project out of expression of unknown type")
+        | CTCon (CCon (con_name, _, _, con_info), args) ->
+          match con_info with
+          | CIAlias    -> Error (E "should be impossible to find a type alias here?")
+          | CIDatatype -> Error (E "cannot project out of a datatype")
+          | CIRecord fields -> Ok (con_name, fields, args)
+      in
+      let* field =
+        match
+          List.find_opt (fun field_decl ->
+            let (Field (name, _, _, _, _, _)) = field_decl in
+            name = field_name) (deref fields)
+        with
+        | None -> Error (E ("record " ^ con_name ^ " has no field " ^ field_name))
+        | Some field -> Ok field
+      in
+      let (Field (_, _, _, qvars, record_ty, result_ty)) = field in
+      let instantiate = instantiate lvl qvars () in
+      let* () = unify e_ty (instantiate record_ty) in
+      let* () = unify ty (instantiate result_ty) in
+      Ok (Project (e', field))
+    | MkRecord [] -> Error (E "empty records are not allowed")
+    | MkRecord fields ->
+      (* Mutable variable keeping track of what we know so far about this record.
+         If the result type is already known to be a record, we can populate this
+         immediately. Otherwise, we have to wait until we see the first field. *)
+      let record_info_ref : (string * field list) option ref =
+        ref (match ground ty with
+             | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _)
+                 -> Some (record_name, deref fs_ref)
+             | _ -> None)
+      in
+      let* fields' = map_m error_monad (fun ((field_name, sp), rhs) ->
+        (* Check whether `record_info_ref` is populated. *)
+        let* (record_name, remaining_fields) =
+          match deref record_info_ref with
+          | Some info -> Ok info
+          | None ->
+            (* look up this field in the context *)
+            let* field = match Ctx.lookup_fld field_name ctx with
+                         | Some field -> Ok field
+                         | None -> Error (E (
+                              "unknown record field: " ^ field_name ^ " " ^ Token.describe_span sp))
+            in
+            let (Field (_, _, _, _, record_ty, _)) = field in
+            match ground record_ty with
+            | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _) ->
+              (match deref fs_ref with
+               | [] -> invalid_arg "impossible: record cannot have empty list of fields"
+               | fields -> Ok (record_name, fields))
+            | _ -> invalid_arg "impossible: field's record_ty has invalid structure"
+        in
+        (* Get the current field out of the list of remaining fields. *)
+        let* field =
+          match list_remove (fun (Field (n, _, _, _, _, _)) -> n = field_name) remaining_fields with
+          | None -> Error (E ("record " ^ record_name ^ " has no field " ^ field_name))
+          | Some (field, remaining_fields) ->
+            record_info_ref := Some (record_name, remaining_fields);
+            Ok field
+        in
+        let (Field (_, _, _, qvars, record_ty, field_ty)) = field in
+        let instantiate = instantiate lvl qvars () in
+        let* () = unify ty (instantiate record_ty) in
+        let* rhs' = infer_at lvl ctx (instantiate field_ty) rhs in
+        Ok (field, rhs')
+      ) fields
+      in
+      let* () =
+        match deref record_info_ref with
+        | None -> invalid_arg "impossible: we never found out what record we're dealing with"
+        | Some (_, []) -> Ok ()
+        | Some (record_name, remaining_fields) ->
+          Error (E ("initializer for record " ^ record_name ^ " is missing fields: " ^
+                      String.concat ", "
+                        (List.map (fun (Field (n, _, _, _, _, _)) -> n) remaining_fields)))
+      in
+      Ok (MkRecord fields')
     | App (e1, e2) ->
       let ty_arg = new_uvar lvl None () in
       let* e1' = infer_at lvl ctx (ty_arg --> ty) e1 in
