@@ -150,7 +150,7 @@ let initial_ctx
       (ctx := Ctx.layer_extend_ty (deref ctx) (CAlias (con, [], def)); def)
     in
     let add_mod name m =
-      ctx := Ctx.layer_extend_mod (deref ctx) Ctx.{ name; layer = m (prefix ^ name ^ ".") }
+      ctx := Ctx.layer_extend_mod (deref ctx) { name; layer = m (prefix ^ name ^ ".") }
     in
     (callback add add_con add_ty add_alias add_mod; deref ctx)
   in
@@ -1025,7 +1025,7 @@ let new_elaborator () : elaborator =
           | Ast.(Module (
               (name, sp), decls)) -> let ctx' = Ctx.extend_new_layer ctx in
                                      let* (ctx'', inner_bindings) = translate_decls ctx' decls in
-                                     let ctx = Ctx.extend_mod ctx Ctx.{
+                                     let ctx = Ctx.extend_mod ctx {
                                        name;
                                        layer = ignore_all_but_the_top ctx''
                                      } in
@@ -1041,7 +1041,7 @@ let new_elaborator () : elaborator =
     let ctx = deref current_ctx in
     let ctx' = Ctx.extend_new_layer (deref current_ctx) in
     let* (ctx'', inner_bindings) = translate_decls ctx' ast in
-    current_ctx := Ctx.extend_mod ctx Ctx.{
+    current_ctx := Ctx.extend_mod ctx {
       name = module_name;
       layer = ignore_all_but_the_top ctx''
     };
