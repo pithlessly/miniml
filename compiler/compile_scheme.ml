@@ -173,6 +173,19 @@ let scheme (_ : Elab.elaborator) (decls : core) =
       let (Field (_, _, field_idx, _, _, _)) = field in
       let (p, e') = go_expr e in
       (p, "(vector-ref " ^ e' ^ " " ^ string_of_int field_idx ^ ")")
+    | MkRecord fields ->
+      (* perform side effects in declaration order *)
+      let fields = List.map (fun (fld, rhs) -> (fld, go_expr_pure rhs)) fields in
+      (* but then, sort the fields by their index *)
+      let fields = list_sort (fun (fld1, _) (fld2, _) ->
+                                let (Field (_, _, pos1, _, _, _)) = fld1
+                                and (Field (_, _, pos2, _, _, _)) = fld2
+                                in pos1 - pos2)
+                             fields
+      in
+      (* and now we can forget about field order *)
+      let fields = List.map snd fields in
+      (true, "(vector " ^ (String.concat " " fields) ^ ")")
     | App (e1, e2) ->
       (false, (
         let (p1, e1') = go_expr e1 in
