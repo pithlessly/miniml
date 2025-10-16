@@ -116,10 +116,26 @@ and unify_all : typ list -> typ list -> unit m_result = fun ts1 ts2 ->
   | (t1 :: ts1, t2 :: ts2) -> let* () = unify t1 t2 in unify_all ts1 ts2
   | _ -> Error (E "cannot unify different numbers of arguments")
 
+type initial_ctx_types = {
+  t_func   : typ -> typ -> typ;
+  t_tuple  : typ list -> typ;
+  t_unit   : typ;
+  t_char   : typ;
+  t_int    : typ;
+  t_string : typ;
+  t_bool   : typ;
+  t_list   : typ -> typ;
+}
+
+type initial_ctx = {
+  top_level : Ctx.t;
+  types : initial_ctx_types;
+}
+
 let initial_ctx
   (next_var_id : unit -> var_id)
   (next_con_id : unit -> con_id)
-=
+: initial_ctx =
   (* it's okay to reuse QVars for multiple variables here -
      they have the same ID, but this is only used to distinguish
      them during instantiation *)
@@ -154,18 +170,26 @@ let initial_ctx
     in
     (callback add add_con add_ty add_alias add_mod; deref ctx)
   in
-  let top_level callback = Ctx.{ top = mk_ctx callback (* prefix: *) ""; parent = None } in
+  let types : initial_ctx_types option ref = ref None in
+  let top_level callback =
+    let top = mk_ctx callback (* prefix: *) "" in
+    { top_level = { top; parent = None };
+      types = Option.unwrap (deref types) }
+  in
   top_level (fun add add_con add_ty add_alias add_mod ->
     let ty0 name = CTCon (add_ty name 0, [])
     and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
     and ty2 name = let c = add_ty name 2 in fun a b -> CTCon (c, a :: b :: [])
     in
+    let t_tuple_con = add_ty "*" (0 - 1) (* TODO: this feels janky? *) in
+    let t_tuple ts = CTCon (t_tuple_con, ts) in
     let (-->) = ty2 "->"
-    and t_tuple = add_ty "*" (0 - 1) (* TODO: this feels janky? *)
-    and t_char = ty0 "char" and t_int = ty0 "int"
-    and t_string = ty0 "string" and t_bool = ty0 "bool"
+    and t_unit = add_alias "unit" (t_tuple [])
+    and t_char = ty0 "char"
+    and t_int = ty0 "int"
+    and t_string = ty0 "string"
+    and t_bool = ty0 "bool"
     in
-    let t_unit = add_alias "unit" (CTCon (t_tuple, [])) in
     add "&&"  [] (t_bool --> (t_bool --> t_bool));
     add "||"  [] (t_bool --> (t_bool --> t_bool));
     add "not" [] (t_bool --> t_bool);
@@ -184,8 +208,8 @@ let initial_ctx
     add "^"   [] (t_string --> (t_string --> t_string));
     add ";"   qa (t_unit --> (a --> a));
     add "min" [] (t_int --> (t_int --> t_int));
-    add "fst" qab (CTCon (t_tuple, a :: b :: []) --> a);
-    add "snd" qab (CTCon (t_tuple, a :: b :: []) --> b);
+    add "fst" qab (t_tuple (a :: b :: []) --> a);
+    add "snd" qab (t_tuple (a :: b :: []) --> b);
     add "int_of_string" [] (t_string --> t_int);
     add "string_of_int" [] (t_int --> t_string);
     add "int_of_char"   [] (t_char --> t_int);
@@ -302,6 +326,16 @@ let initial_ctx
       add "argv" [] (t_unit --> t_list t_string);
       ()
     ));
+    types := Some {
+      t_func = (-->);
+      t_tuple;
+      t_unit;
+      t_char;
+      t_int;
+      t_string;
+      t_bool;
+      t_list;
+    };
     ()
   )
 
@@ -352,29 +386,13 @@ let new_elaborator () : elaborator =
   and next_con_id = counter ()
   in
   let initial_ctx = initial_ctx next_var_id next_con_id in
-  let (ty0, ty1, ty2) =
-    let expect_arity n name =
-      match Ctx.lookup_ty name initial_ctx with
-      | Some (CNominal c) ->
-        let (CCon (_, _, arity, _)) = c in
-        if arity = n then c
-        else invalid_arg ("impossible: expected arity " ^ string_of_int n)
-      | Some _ -> invalid_arg ("impossible: type " ^ name ^ " is not a datatype")
-      | None -> invalid_arg ("impossible: no such type " ^ name)
-    in
-    ((fun name -> let c = expect_arity 0 name in            CTCon (c, [])),
-     (fun name -> let c = expect_arity 1 name in fun a   -> CTCon (c, a :: [])),
-     (fun name -> let c = expect_arity 2 name in fun a b -> CTCon (c, a :: b :: [])))
-  in
-  let (-->)    = ty2 "->"
-  and t_tuple  = match Ctx.lookup_ty "*" initial_ctx with
-                 | Some (CNominal c) -> fun args -> CTCon (c, args)
-                 | _ -> invalid_arg "impossible"
-  and t_char   = ty0 "char"
-  and t_int    = ty0 "int"
-  and t_string = ty0 "string"
-  and t_bool   = ty0 "bool"
-  and t_list   = ty1 "list"
+  let (-->)    = initial_ctx.types.t_func
+  and t_tuple  = initial_ctx.types.t_tuple
+  and t_char   = initial_ctx.types.t_char
+  and t_int    = initial_ctx.types.t_int
+  and t_string = initial_ctx.types.t_string
+  and t_bool   = initial_ctx.types.t_bool
+  and t_list   = initial_ctx.types.t_list
   in
   let new_uvar lvl name () : typ =
     let id = next_uvar_name () in
@@ -1036,7 +1054,7 @@ let new_elaborator () : elaborator =
                                      | None     -> Error (E ("module not in scope: " ^ name))
         ) decls ctx
   in
-  let current_ctx = ref initial_ctx in
+  let current_ctx = ref initial_ctx.top_level in
   let elab_module module_name ast =
     let ctx = deref current_ctx in
     let ctx' = Ctx.extend_new_layer (deref current_ctx) in
