@@ -412,7 +412,7 @@ let new_elaborator () : elaborator =
                | None   -> string_of_int id
     in CUVar (ref (Unknown (name, id, lvl)))
   in
-  let new_uvars lvl name (xs : 'a list) () : ('a * typ) list =
+  let new_uvars lvl name xs () =
     List.mapi (fun i x ->
       let name = match name with
                  | Some nm -> Some (nm ^ "[" ^ string_of_int i ^ "]")
