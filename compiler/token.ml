@@ -1,8 +1,8 @@
-type span = | LineNo of int
-let dummy_span = LineNo (0 - 1)
-let describe_span (LineNo n) =
-  if n = 0 - 1 then "(dummy)"
-  else "(near line " ^ string_of_int n ^ ")"
+type span = { line_no : int }
+let dummy_span = { line_no = 0 - 1 }
+let describe_span (sp : span) =
+  if sp.line_no = 0 - 1 then "(dummy)"
+  else "(near line " ^ string_of_int sp.line_no ^ ")"
 
 type token =
   | OpenParen

@@ -38,7 +38,7 @@ let lex str =
                        | None -> d
       in
       let d = scan d in
-      let span = LineNo (deref latest_line) in
+      let span = { line_no = deref latest_line } in
       go (i + d) (mk_tok span (String.sub str i d) :: tokens)
     in
     match char i with
