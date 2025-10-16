@@ -702,7 +702,10 @@ let new_elaborator () : elaborator =
     | CharLit _
     | IntLit _
     | StrLit _
+    | Var _
     | App (_, _)
+    | LetIn (_, _)
+    | Match (_, _)
     | IfThenElse (_, _, _)
       -> infer' lvl ctx expr
     | Con (name, args) ->
@@ -714,13 +717,6 @@ let new_elaborator () : elaborator =
       let* () = unify_all param_tys (List.map snd args') in
       let args' = List.map fst args' in
       Ok (Con (cv, Some args'), ground result_ty)
-    | Var (s, sp) ->
-            (match Ctx.lookup s ctx with
-            | None -> Error (E ("variable not in scope: " ^ s ^ " " ^ Token.describe_span sp))
-            | Some v ->
-              let (Binding (_, _, _, qvars, ty)) = v in
-              let ty = instantiate lvl qvars () ty in
-              Ok (Var v, ty))
     | OpenIn (MModule name, e) -> (
       match Ctx.extend_open_over ctx name with
       | Some ctx -> infer lvl ctx e
@@ -798,27 +794,6 @@ let new_elaborator () : elaborator =
       in
       let* fields' = visit_fields ((field1, rhs1') :: []) remaining_fields fs in
       Ok (MkRecord fields', result_ty)
-    | LetIn (bindings, e) ->
-      let* (ctx', bindings') = infer_bindings lvl ctx bindings in
-      let* (e', ty_e) = infer lvl ctx' e in
-      Ok (LetIn (bindings', e'), ground ty_e)
-    | Match (e_scrut, cases) ->
-      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
-      let ty_res = new_uvar lvl None () in
-      let* (e_scrut', ty_scrut) = infer lvl ctx e_scrut in
-      let* cases' =
-        map_m error_monad
-            (fun (pat, e) ->
-              let* (ctx', (pat', ty_pat)) = infer_pat lvl tvs ctx pat in
-              let* ()                     = unify ty_pat ty_scrut in
-              let* e'                     = infer_at lvl ctx' ty_res e in
-              Ok (pat', e'))
-            cases
-      in
-      Ok (
-        Match (e_scrut', cases'),
-        ground ty_res
-      )
     | Fun (pats, e) ->
       let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
       let* (ctx', pats') = infer_pats lvl tvs ctx pats in
@@ -866,13 +841,37 @@ let new_elaborator () : elaborator =
     | CharLit c -> let* () = unify ty t_char   in Ok (CharLit c)
     | IntLit i  -> let* () = unify ty t_int    in Ok (IntLit  i)
     | StrLit s  -> let* () = unify ty t_string in Ok (StrLit  s)
-    (* missing cases: Var, OpenIn, Project, MkRecord *)
+    | Var (s, sp) -> (
+      match Ctx.lookup s ctx with
+      | None -> Error (E ("variable not in scope " ^ s ^ " " ^ Token.describe_span sp))
+      | Some v ->
+        let (Binding (_, _, _, qvars, ty_v)) = v in
+        let ty_v = instantiate lvl qvars () ty_v in
+        let* () = unify ty_v ty in
+        Ok (Var v))
+    (* missing cases: OpenIn, Project, MkRecord *)
     | App (e1, e2) ->
       let ty_arg = new_uvar lvl None () in
       let* e1' = infer_at lvl ctx (ty_arg --> ty) e1 in
       let* e2' = infer_at lvl ctx ty_arg          e2 in
       Ok (App (e1', e2'))
-    (* missing cases: LetIn, Match *)
+    | LetIn (bindings, e) ->
+      let* (ctx', bindings') = infer_bindings lvl ctx bindings in
+      let* e' = infer_at lvl ctx' ty e in
+      Ok (LetIn (bindings', e'))
+    | Match (e_scrut, cases) ->
+      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
+      let* (e_scrut', ty_scrut) = infer' lvl ctx e_scrut in
+      let* cases' =
+        map_m error_monad
+            (fun (pat, e) ->
+              let* (ctx', (pat', ty_pat)) = infer_pat lvl tvs ctx pat in
+              let* ()                     = unify ty_pat ty_scrut in
+              let* e'                     = infer_at lvl ctx' ty e in
+              Ok (pat', e'))
+            cases
+      in
+      Ok (Match (e_scrut', cases'))
     | IfThenElse (e1, e2, e3) ->
       let* e1' = infer_at lvl ctx t_bool e1 in
       let* e2' = infer_at lvl ctx ty     e2 in
