@@ -608,6 +608,7 @@ and expr5 = fun input k ->
       | IdentLower (s, sp) :: input ->
           (* field punning *)
           continue_after_field input field_names fs (s, sp) (Var (s, sp))
+      | _ -> Error (E "expected another field in the record")
     and continue_after_field input field_names fs field rhs =
       let* field_names =
         let (s, sp) = field in
