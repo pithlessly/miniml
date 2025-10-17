@@ -384,6 +384,59 @@ let preprocess_constructor_args
   in
   Ok (cv, param_tys, result_ty, args)
 
+let visit_record_fields
+  (instantiate : qvar list -> unit -> typ -> typ)
+  (ty : typ)
+  (ctx : Ctx.t)
+  (infer_rhs : typ -> 'a -> 'b m_result)
+  (fields : (Ast.field * 'a) list)
+: ((string * field list) option * (field * 'b) list) m_result =
+  (* Mutable variable keeping track of what we know so far about this record.
+     If the result type is already known to be a record, we can populate this
+     immediately. Otherwise, we have to wait until we see the first field. *)
+  let record_info_ref : (string * field list) option ref =
+    ref (match ground ty with
+         | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _)
+             -> Some (record_name, deref fs_ref)
+         | _ -> None)
+  in
+  let* fields' = map_m error_monad
+    (fun ((field_name, sp), rhs) ->
+      (* Check whether `record_info_ref` is populated. *)
+      let* (record_name, remaining_fields) =
+        match deref record_info_ref with
+        | Some info -> Ok info
+        | None ->
+          (* look up this field in the context *)
+          let* field = match Ctx.lookup_fld field_name ctx with
+                       | Some field -> Ok field
+                       | None -> Error (err_sp ("unknown record field: " ^ field_name) sp)
+          in
+          let (Field (_, _, _, _, record_ty, _)) = field in
+          match ground record_ty with
+          | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _) ->
+            (match deref fs_ref with
+             | [] -> invalid_arg "impossible: record cannot have empty list of fields"
+             | fields -> Ok (record_name, fields))
+          | _ -> invalid_arg "impossible: field's record_ty has invalid structure"
+      in
+      (* Get the current field out of the list of remaining fields. *)
+      let* field =
+        match list_remove (fun (Field (n, _, _, _, _, _)) -> n = field_name) remaining_fields with
+        | None -> Error (E ("record " ^ record_name ^ " has no field " ^ field_name))
+        | Some (field, remaining_fields) ->
+          record_info_ref := Some (record_name, remaining_fields);
+          Ok field
+      in
+      let (Field (_, _, _, qvars, record_ty, field_ty)) = field in
+      let instantiate = instantiate qvars () in
+      let* () = unify ty (instantiate record_ty) in
+      let* rhs' = infer_rhs (instantiate field_ty) rhs in
+      Ok (field, rhs')
+    ) fields
+  in
+  Ok (deref record_info_ref, fields')
+
 type elaborator = {
   next_var_id : unit -> var_id;
   next_con_id : unit -> con_id;
@@ -812,51 +865,13 @@ let new_elaborator () : elaborator =
       Ok (Project (e', field))
     | MkRecord [] -> Error (E "empty records are not allowed")
     | MkRecord fields ->
-      (* Mutable variable keeping track of what we know so far about this record.
-         If the result type is already known to be a record, we can populate this
-         immediately. Otherwise, we have to wait until we see the first field. *)
-      let record_info_ref : (string * field list) option ref =
-        ref (match ground ty with
-             | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _)
-                 -> Some (record_name, deref fs_ref)
-             | _ -> None)
-      in
-      let* fields' = map_m error_monad (fun ((field_name, sp), rhs) ->
-        (* Check whether `record_info_ref` is populated. *)
-        let* (record_name, remaining_fields) =
-          match deref record_info_ref with
-          | Some info -> Ok info
-          | None ->
-            (* look up this field in the context *)
-            let* field = match Ctx.lookup_fld field_name ctx with
-                         | Some field -> Ok field
-                         | None -> Error (err_sp ("unknown record field: " ^ field_name) sp)
-            in
-            let (Field (_, _, _, _, record_ty, _)) = field in
-            match ground record_ty with
-            | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _) ->
-              (match deref fs_ref with
-               | [] -> invalid_arg "impossible: record cannot have empty list of fields"
-               | fields -> Ok (record_name, fields))
-            | _ -> invalid_arg "impossible: field's record_ty has invalid structure"
-        in
-        (* Get the current field out of the list of remaining fields. *)
-        let* field =
-          match list_remove (fun (Field (n, _, _, _, _, _)) -> n = field_name) remaining_fields with
-          | None -> Error (E ("record " ^ record_name ^ " has no field " ^ field_name))
-          | Some (field, remaining_fields) ->
-            record_info_ref := Some (record_name, remaining_fields);
-            Ok field
-        in
-        let (Field (_, _, _, qvars, record_ty, field_ty)) = field in
-        let instantiate = instantiate lvl qvars () in
-        let* () = unify ty (instantiate record_ty) in
-        let* rhs' = infer_at lvl ctx (instantiate field_ty) rhs in
-        Ok (field, rhs')
-      ) fields
+      let* (record_info, fields') = visit_record_fields (instantiate lvl)
+                                                        ty ctx
+                                                        (infer_at lvl ctx)
+                                                        fields
       in
       let* () =
-        match deref record_info_ref with
+        match record_info with
         | None -> invalid_arg "impossible: we never found out what record we're dealing with"
         | Some (_, []) -> Ok ()
         | Some (record_name, remaining_fields) ->
