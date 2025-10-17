@@ -826,12 +826,12 @@ let new_elaborator () : elaborator =
       match Ctx.extend_open_over ctx name with
       | Some ctx -> infer_at lvl ctx ty e
       | None     -> Error (E ("module not in scope: " ^ name)))
-    | Project (e, (field_name, _)) ->
+    | Project (e, (field_name, sp)) ->
       let* (e', e_ty) = infer' lvl ctx e in
       let* (con_name, fields, args) =
         match ground e_ty with
         | CQVar qv -> Error (unexpected_qvar qv)
-        | CUVar _  -> Error (E "cannot project out of expression of unknown type")
+        | CUVar _  -> Error (err_sp "cannot project out of expression of unknown type" sp)
         | CTCon (CCon (con_name, _, _, con_info), args) ->
           match con_info with
           | CIAlias    -> Error (E "should be impossible to find a type alias here?")
