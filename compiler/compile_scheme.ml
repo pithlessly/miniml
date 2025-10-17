@@ -191,7 +191,7 @@ let scheme (_ : Elab.elaborator) (decls : core) =
       in
       (* and now we can forget about field order *)
       let fields = List.map snd fields in
-      (true, "(vector " ^ (String.concat " " fields) ^ ")")
+      (true, "(vector " ^ String.concat " " fields ^ ")")
     | App (e1, e2) ->
       (false, (
         let (p1, e1') = go_expr e1 in
