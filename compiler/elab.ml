@@ -43,18 +43,24 @@ let show_ty : typ -> string =
    - A "dynamic" type variable scope is used for processing type annotations inside terms, and
      it dynamically generates a new type variable every time one with a new name is requested.
  *)
-type tvs = { lookup : string -> typ option; }
+type tvs = {
+  lookup : string -> typ option;
+  hole   : unit -> typ option;
+}
 let tvs_from_map (m : typ StringMap.t) =
-  { lookup = fun s -> StringMap.lookup s m }
-let tvs_new_dynamic (new_ty : string -> typ) () =
+  { lookup = (fun s -> StringMap.lookup s m);
+    hole = (fun () -> None) }
+let tvs_new_dynamic (new_ty : string option -> typ) () =
   let cache = ref StringMap.empty in
-  { lookup = fun s ->
-    match StringMap.lookup s (deref cache) with
-    | Some ty -> Some ty
-    | None ->
-      let ty = new_ty s in
-      cache := Option.unwrap (StringMap.insert s ty (deref cache));
-      Some ty }
+  { lookup = (fun s ->
+      match StringMap.lookup s (deref cache) with
+      | Some ty -> Some ty
+      | None ->
+        let ty = new_ty (Some s) in
+        cache := Option.unwrap (StringMap.insert s ty (deref cache));
+        Some ty);
+    hole = (fun () -> Some (new_ty None))
+  }
 
 let rec occurs_check (v : uvar ref) : typ -> unit m_result =
   function
@@ -922,7 +928,7 @@ let new_elaborator () : elaborator =
       let* e' = infer_at lvl ctx' ty e in
       Ok (LetIn (bindings', e'))
     | Match (e_scrut, cases) ->
-      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
+      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl s ()) () in
       let* (e_scrut', ty_scrut) = infer lvl ctx e_scrut in
       let* cases' =
         map_m error_monad
@@ -939,7 +945,7 @@ let new_elaborator () : elaborator =
       let* e3' = infer_at lvl ctx ty     e3 in
       Ok (IfThenElse (e1', e2', e3'))
     | Fun (pats, e) ->
-      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
+      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl s ()) () in
       let return_ty = new_uvar lvl None () in
       let pats : (Ast.pat * typ) list = new_uvars lvl None pats () in
       let* () =
@@ -951,7 +957,7 @@ let new_elaborator () : elaborator =
       let* e' = infer_at lvl ctx' return_ty e in
       Ok (Fun (pats', e'))
     | Function cases ->
-      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
+      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl s ()) () in
       let ty_res = new_uvar lvl None () in
       let ty_arg = new_uvar lvl None () in
       let* () = unify ty (ty_arg --> ty_res) in
@@ -970,7 +976,7 @@ let new_elaborator () : elaborator =
   and infer_bindings lvl : Ctx.t -> Ast.bindings -> (Ctx.t * bindings) m_result =
     fun ctx (Bindings (is_rec, bindings)) ->
     let lvl' = lvl + 1 in
-    let tvs = tvs_new_dynamic (fun s -> new_uvar lvl' (Some s) ()) () in
+    let tvs = tvs_new_dynamic (fun s -> new_uvar lvl' s ()) () in
     (* for each binding, determine the variables bound by the head *)
     let* bindings =
       map_m error_monad
