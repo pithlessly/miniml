@@ -806,11 +806,6 @@ let new_elaborator () : elaborator =
       | PWild        -> Ok PWild
     in go ctx
   in
-  let infer_pat_with_vars lvl tvs ctx bindings pat : (pat * typ) m_result =
-    let ty = new_uvar lvl None () in
-    let* p' = infer_pat_with_vars_at lvl tvs ctx bindings ty pat in
-    Ok (p', ty)
-  in
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
   let infer_pat_at lvl tvs ctx ty pat : (Ctx.t * pat) m_result =
     let* bindings = pat_bound_vars lvl pat in
@@ -1009,14 +1004,14 @@ let new_elaborator () : elaborator =
             | None    -> Ok (new_uvar lvl' None ())
             | Some ty -> translate_ast_typ ctx tvs ty
           in
-          let* (head', ty_head)   = infer_pat_with_vars lvl' tvs ctx bound_vars head  in
-          let* (ctx_inner, args') = infer_pats          lvl' tvs ctx_inner args       in
-          let* rhs'               = infer_at            lvl'     ctx_inner ty_rhs rhs in
-          let* () =
-            unify ty_head (List.fold_right
-                            (fun (_, ty1) ty2 -> (ty1 --> ty2))
-                            args' ty_rhs)
+          let* (ctx_inner, args') = infer_pats lvl' tvs ctx_inner args in
+          let ty_head =
+            List.fold_right
+              (fun (_, ty1) ty2 -> (ty1 --> ty2))
+              args' ty_rhs
           in
+          let* rhs'  = infer_at               lvl'     ctx_inner      ty_rhs  rhs  in
+          let* head' = infer_pat_with_vars_at lvl' tvs ctx bound_vars ty_head head in
           let args' = List.map fst args' in
           let* can_generalize =
             (* TODO: the value restriction is a little looser than this *)
