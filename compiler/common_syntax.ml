@@ -14,6 +14,10 @@ type ('var, 'con, 'fld, 'ty) pat =
         | POpenIn  of mod_expr
                     * ('var, 'con, 'fld, 'ty) pat
         | PAsc     of ('var, 'con, 'fld, 'ty) pat * 'ty
+        | PRecord  of bool (* exhaustive? *)
+                    * ( 'fld
+                      * ('var, 'con, 'fld, 'ty) pat
+                      ) list
         | PWild
 type ('var, 'con, 'fld, 'ty) binding
         = ('var, 'con, 'fld, 'ty) pat      (* head pattern *)

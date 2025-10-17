@@ -338,6 +338,34 @@ let rec pattern3 : pat option parser = fun input k ->
   | KUnder       :: input -> k input (Some PWild)
   | OpenBracket  :: input -> list_after_open_bracket pattern0 input (fun input ps ->
                              k input (Some (PList ps)))
+  | OpenBrace    :: input -> let rec start () = continue input StringMap.empty []
+                             and finish input exhaustive fs = k input (Some (PRecord (exhaustive, List.rev fs)))
+                             and continue input field_names fs =
+                               match input with
+                               | CloseBrace :: input -> finish input true fs
+                               | KUnder ::              CloseBrace :: input
+                               | KUnder :: Semicolon :: CloseBrace :: input
+                                                     -> finish input false fs
+                               | IdentLower (s, sp) :: Equal :: input ->
+                                   pattern0 input (fun input expr ->
+                                   continue_after_field input field_names fs (s, sp) expr)
+                               | IdentLower (s, sp) :: input ->
+                                   (* field punning *)
+                                   continue_after_field input field_names fs (s, sp) (PVar (s, sp))
+                               | _ -> Error (E "expected another field in the record")
+                             and continue_after_field input field_names fs field rhs =
+                               let* field_names =
+                                 let (s, sp) = field in
+                                 match StringMap.insert s () field_names with
+                                 | Some field_names -> Ok field_names
+                                 | None -> Error (err_sp ("duplicate field name in record expression: " ^ s) sp)
+                               in
+                               let fs = (field, rhs) :: fs in
+                               match input with
+                               | CloseBrace :: input -> finish input true fs
+                               | Semicolon :: input -> continue input field_names fs
+                               | _ -> Error (E "expected ';' or '}' after record pattern field")
+                             in start ()
   | OpenParen :: KLet :: IdentSymbol (s, sp) :: CloseParen
                  :: input -> k input (Some (PVar ("let" ^ s, sp))) (* FIXME: span is slightly wrong *)
   | OpenParen :: IdentSymbol (s, sp) :: CloseParen
