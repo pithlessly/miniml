@@ -697,6 +697,8 @@ let new_elaborator () : elaborator =
       | PVar (v, _)  -> Ok (StringMap.singleton v ())
       | POpenIn (_, p)
       | PAsc (p, _)  -> go p
+      | PRecord (_, fs)
+                     -> go_list (List.map snd fs)
     and go_list pats =
       List.fold_left merge (Ok StringMap.empty) (List.map go pats)
     and merge ev1 ev2 =
@@ -766,6 +768,36 @@ let new_elaborator () : elaborator =
                      -> let* asc_ty' = translate_ast_typ ctx tvs asc_ty in
                         let* () = unify ty asc_ty' in
                         go ctx ty p
+      (* Technically, we could change this to allow the non-exhaustive empty record
+         pattern { _ } as long as it is clear from the result type what this record is.
+       *)
+      | PRecord (_, []) -> Error (E "empty record patterns are not allowed")
+      | PRecord (exhaustive, fields) ->
+        let* (record_info, fields') = visit_record_fields (instantiate lvl)
+                                                          ty ctx
+                                                          (go ctx)
+                                                          fields
+        in
+        let (record_name, remaining_fields) =
+          match record_info with
+          | None -> invalid_arg "impossible: we never found out what record we're dealing with"
+          | Some info -> info
+        in
+        let* () =
+          match (exhaustive, remaining_fields) with
+          | (false, []) ->
+              Error (E ("pattern of record type " ^ record_name ^
+                        " is marked non-exhaustive, but all fields are accounted for"))
+          | (true, [])
+          | (false, _) -> Ok ()
+          | (true, _) ->
+              Error (E ("pattern of record type " ^ record_name ^
+                        " is missing fields: " ^
+                          String.concat ", "
+                            (List.map (fun (Field (n, _, _, _, _, _)) -> n)
+                                      remaining_fields)))
+        in
+        Ok (PRecord (exhaustive, fields'))
       | PWild        -> Ok PWild
     in go ctx
   in
@@ -1095,3 +1127,5 @@ let rec pat_local_vars : pat -> var list =
   | POpenIn (_, _)
                  -> invalid_arg "POpenIn should no longer be present in Core.pat"
   | PAsc (_, vd) -> Void.absurd vd
+  | PRecord (_, fs)
+                 -> List.concat_map (fun (_, p) -> pat_local_vars p) fs
