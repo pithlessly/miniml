@@ -129,6 +129,12 @@ let scheme (_ : Elab.elaborator) (decls : core) =
     | PVar v -> "(begin (set! " ^ go_var v ^ " scrutinee) #t)"
     | POpenIn (_, _) -> invalid_arg "POpenIn should no longer be present in Core.pat"
     | PAsc (_, vd) -> Void.absurd vd
+    | PRecord (_, fields) ->
+      "(and " ^ String.concat " "
+        (List.map (fun (fld, p) ->
+          let (Field (_, _, field_idx, _, _, _)) = fld in
+          "(let ((scrutinee (vector-ref scrutinee " ^ string_of_int field_idx ^ "))) "
+          ^ go_pat p ^ ")") fields) ^ ")"
     | PWild -> "#t"
   in
   let rec go_expr : expr -> bool * string =
