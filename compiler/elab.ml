@@ -11,7 +11,7 @@ let show_ty : typ -> string =
       if prec <= thresh then f else
       fun acc -> "(" :: f (")" :: acc) in
     match ty with
-    | CQVar qv -> fun acc -> "'" :: qv.name :: acc
+    | CQVar { name; _ } -> fun acc -> "'" :: name :: acc
     | CUVar r -> (match deref r with
                   | Known ty -> go prec ty
                   | Unknown (s, _, lvl) ->
@@ -102,8 +102,8 @@ let ground : typ -> typ =
     List.iter (fun r -> r := Known ty) obligations;
     ty
 
-let unexpected_qvar (qv : qvar) =
-  E ("found CQVar (" ^ qv.name ^ " " ^ string_of_int qv.id ^ ") - should be impossible")
+let unexpected_qvar ({ name; id } : qvar) =
+  E ("found CQVar (" ^ name ^ " " ^ string_of_int id ^ ") - should be impossible")
 
 let rec unify : typ -> typ -> unit m_result = fun t1 t2 ->
   (* FIXME: avoid physical equality on types? *)
@@ -457,13 +457,8 @@ let new_elaborator () : elaborator =
   in
   let new_qvar name () : qvar = { name; id = next_var_id () } in
   let initial_ctx = initial_ctx next_var_id new_qvar next_con_id in
-  let (-->)    = initial_ctx.types.t_func
-  and t_tuple  = initial_ctx.types.t_tuple
-  and t_char   = initial_ctx.types.t_char
-  and t_int    = initial_ctx.types.t_int
-  and t_string = initial_ctx.types.t_string
-  and t_bool   = initial_ctx.types.t_bool
-  and t_list   = initial_ctx.types.t_list
+  let { t_func = (-->); t_tuple; t_char; t_int; t_string; t_bool; t_list; _ }
+      = initial_ctx.types
   in
   let new_uvar lvl name () : typ =
     let id = next_uvar_name () in

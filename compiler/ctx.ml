@@ -10,11 +10,11 @@ type t = { top : layer;
 let empty_layer : layer = ([], [], [], [], [])
 let find : (layer -> 'a list) -> ('a -> string) -> string -> t -> 'a option =
   fun get_list get_name name ->
-    let rec go (ctx : t) =
-      match List.find_opt (fun item -> get_name item = name) (get_list ctx.top) with
+    let rec go { top; parent } =
+      match List.find_opt (fun item -> get_name item = name) (get_list top) with
       | Some x -> Some x
-      | None   -> match ctx.parent with | None -> None
-                                        | Some p -> go p
+      | None   -> match parent with | None -> None
+                                    | Some p -> go p
     in go
 let lookup     : string -> t ->    Core.var option = find (fun (vars, _, _, _, _) -> vars)
                                                           (fun Core.(Binding (name, _, _, _, _)) -> name)
