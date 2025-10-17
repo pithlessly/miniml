@@ -302,6 +302,24 @@ let projection : field option parser =
   | Dot :: IdentLower (s, sp) :: input -> k input (Some (s, sp))
   | _                                  -> k input None
 
+let list_after_open_bracket
+  (parse_elem : 'a parser)
+: 'a list parser
+= fun input k ->
+  let rec start () = continue input []
+  and finish input es = k input (List.rev es)
+  and continue input es =
+    match input with
+    | CloseBracket :: input -> finish input es
+    | input ->
+      parse_elem input (fun input expr ->
+      let es = expr :: es in
+      match input with
+      | CloseBracket :: input -> finish input es
+      | Semicolon :: input -> continue input es
+      | _ -> Error (E "expected ';' or ']' after list item"))
+  in start ()
+
 (* parsing patterns *)
 
 let rec pattern3 : pat option parser = fun input k ->
@@ -318,9 +336,8 @@ let rec pattern3 : pat option parser = fun input k ->
   | IdentLower (s, sp)
                  :: input -> k input (Some (PVar (s, sp)))
   | KUnder       :: input -> k input (Some PWild)
-  | OpenBracket :: CloseBracket
-                 :: input -> k input (Some (PList []))
-  | OpenBracket  :: _     -> Error (E "only empty list literals are supported")
+  | OpenBracket  :: input -> list_after_open_bracket pattern0 input (fun input ps ->
+                             k input (Some (PList ps)))
   | OpenParen :: KLet :: IdentSymbol (s, sp) :: CloseParen
                  :: input -> k input (Some (PVar ("let" ^ s, sp))) (* FIXME: span is slightly wrong *)
   | OpenParen :: IdentSymbol (s, sp) :: CloseParen
@@ -592,9 +609,9 @@ and expr5 = fun input k ->
   | TkStrLit s   :: input -> k input (Some (StrLit s))
   | IdentLower (s, sp)
                  :: input -> k input (Some (Var (s, sp)))
-  | OpenBracket :: CloseBracket
-                 :: input -> k input (Some (List []))
-  | OpenBracket  :: _     -> Error (E "only empty list literals are supported")
+  | OpenBracket  :: input ->
+    list_after_open_bracket force_expr1 input (fun input es ->
+    k input (Some (List es)))
   | OpenBrace    :: input ->
     let rec start () = continue input StringMap.empty []
     and finish input fs = k input (Some (MkRecord (List.rev fs)))
