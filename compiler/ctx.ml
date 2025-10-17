@@ -26,7 +26,7 @@ let lookup_ty  : string -> t -> Core.tydecl option = find (fun (_, _, _, cons, _
                                                           (fun Core.(CNominal (CCon (name, _, _, _)) |
                                                                      CAlias   (CCon (name, _, _, _), _, _)) -> name)
 let lookup_mod : string -> t ->     module_ option = find (fun (_, _, _, _, modules) -> modules)
-                                                          (fun (m : module_) -> m.name)
+                                                          (fun m -> m.name)
 
 let layer_extend     (vars, cvars, fields, cons, modules) v   = (v :: vars, cvars, fields, cons, modules)
 let layer_extend_con (vars, cvars, fields, cons, modules) cv  = (vars, cv :: cvars, fields, cons, modules)
@@ -34,7 +34,7 @@ let layer_extend_fld (vars, cvars, fields, cons, modules) f   = (vars, cvars, f 
 let layer_extend_ty  (vars, cvars, fields, cons, modules) con = (vars, cvars, fields, con :: cons, modules)
 let layer_extend_mod (vars, cvars, fields, cons, modules) m   = (vars, cvars, fields, cons, m :: modules)
 let update : (layer -> 'a -> layer) -> t -> 'a -> t =
-  fun f (ctx : t) x -> { top = f ctx.top x; parent = ctx.parent }
+  fun f ctx x -> { top = f ctx.top x; parent = ctx.parent }
 let extend     = update layer_extend
 let extend_con = update layer_extend_con
 let extend_fld = update layer_extend_fld
@@ -45,7 +45,7 @@ let extend_open_over : t -> string -> t option =
     Option.map (fun (m : module_) -> { top = m.layer; parent = Some ctx })
       (lookup_mod mod_name ctx)
 let extend_open_under : t -> string -> t option =
-  fun (ctx : t) mod_name ->
+  fun ctx mod_name ->
     Option.map (fun (m : module_) -> { top = ctx.top; parent = Some { top = m.layer; parent = ctx.parent } })
       (lookup_mod mod_name ctx)
 let extend_new_layer : t -> t =

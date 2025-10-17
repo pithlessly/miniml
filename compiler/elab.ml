@@ -739,11 +739,11 @@ let new_elaborator () : elaborator =
   and infer_pats lvl tvs : Ctx.t -> Ast.pat list -> (Ctx.t * (pat * typ) list) m_result =
     Fun.flip (map_m error_state_monad (fun pat ctx -> infer_pat lvl tvs ctx pat))
   in
-  let rec infer' lvl ctx (e : Ast.expr) : (expr * typ) m_result =
+  let rec infer' lvl ctx e : (expr * typ) m_result =
     let ty_res = new_uvar lvl None () in
     let* e' = infer_at lvl ctx ty_res e in
     Ok (e', ground ty_res)
-  and infer_at lvl ctx (ty : typ) : Ast.expr -> expr m_result =
+  and infer_at lvl ctx ty : Ast.expr -> expr m_result =
     function
     | Tuple es ->
       let es_and_types : (Ast.expr * typ) list = new_uvars lvl None es () in
