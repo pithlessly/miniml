@@ -515,7 +515,6 @@ and expr2 = fun input k ->
       (fun (s, sp) ->
         let operator_function l r = App (App (Var (s, sp), l), r) in
         match String.get s 0 with
-        | ';' -> (0, AssocRight operator_function)
         | ',' -> (1, AssocNone (fun es -> Tuple es))
         | '|' -> (2, AssocRight operator_function)
         | '&' -> (3, AssocRight operator_function)
