@@ -113,7 +113,7 @@ and colon       : unit parser
                                                   | _                  -> Error (E "expected ':'")
 and semicolon   : unit parser
                 = fun input k -> match input with | Semicolon :: input -> k input ()
-                                                  | _                -> Error (E "expected ':'")
+                                                  | _                  -> Error (E "expected ';'")
 and k_struct    : unit parser
                 = fun input k -> match input with | KStruct   :: input -> k input ()
                                                   | _                  -> Error (E "expected 'struct'")
