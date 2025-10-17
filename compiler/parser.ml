@@ -176,6 +176,7 @@ let rec ty_atomic: typ parser =
       (* artificially prepend "," to the input stream
          to simplify the parsing here *)
       in go (dummy Comma input) []
+    | KUnder :: input -> k input [THole]
     | _ -> Error (E "couldn't start parsing a type")
   in
   fun input k ->

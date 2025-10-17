@@ -508,7 +508,7 @@ let new_elaborator () : elaborator =
         (match Ctx.extend_open_over ctx mod_name with
          | None     -> Error (E ("module not in scope: " ^ mod_name))
          | Some ctx -> go ctx Ast.(TCon (ms, name, sp, args)))
-      | Ast.(TCon ([], name, sp, args)) ->
+      | Ast.(TCon ([], name, sp, args)) -> (
         match Ctx.lookup_ty name ctx with
         | None -> Error (E ("type constructor not in scope: " ^ name))
         | Some decl ->
@@ -522,7 +522,11 @@ let new_elaborator () : elaborator =
             match decl with
             | CNominal _ -> Ok (CTCon (con, args'))
             | CAlias (_, params, definition) ->
-              subst (List.map2 (fun p a -> (p, a)) params args') definition
+              subst (List.map2 (fun p a -> (p, a)) params args') definition)
+      | Ast.(THole) ->
+        match tvs.hole () with
+        | Some ty -> Ok ty
+        | None -> Error (E "type holes are not permitted in this context")
     in go ctx
   in
   let translate_ast_typ_decl : (string list * string * Ast.typ_decl) list ->
