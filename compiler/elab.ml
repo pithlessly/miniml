@@ -739,7 +739,7 @@ let new_elaborator () : elaborator =
   and infer_pats lvl tvs : Ctx.t -> Ast.pat list -> (Ctx.t * (pat * typ) list) m_result =
     Fun.flip (map_m error_state_monad (fun pat ctx -> infer_pat lvl tvs ctx pat))
   in
-  let rec infer' lvl ctx e : (expr * typ) m_result =
+  let rec infer lvl ctx e : (expr * typ) m_result =
     let ty_res = new_uvar lvl None () in
     let* e' = infer_at lvl ctx ty_res e in
     Ok (e', ground ty_res)
@@ -785,7 +785,7 @@ let new_elaborator () : elaborator =
       | Some ctx -> infer_at lvl ctx ty e
       | None     -> Error (E ("module not in scope: " ^ name)))
     | Project (e, (field_name, sp)) ->
-      let* (e', e_ty) = infer' lvl ctx e in
+      let* (e', e_ty) = infer lvl ctx e in
       let* (con_name, fields, args) =
         match ground e_ty with
         | CQVar qv -> Error (unexpected_qvar qv)
@@ -876,7 +876,7 @@ let new_elaborator () : elaborator =
       Ok (LetIn (bindings', e'))
     | Match (e_scrut, cases) ->
       let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
-      let* (e_scrut', ty_scrut) = infer' lvl ctx e_scrut in
+      let* (e_scrut', ty_scrut) = infer lvl ctx e_scrut in
       let* cases' =
         map_m error_monad
             (fun (pat, e) ->
