@@ -922,9 +922,8 @@ let new_elaborator () : elaborator =
       let* cases' =
         map_m error_monad
             (fun (pat, e) ->
-              let* (ctx', (pat', ty_pat)) = infer_pat lvl tvs ctx pat in
-              let* ()                     = unify ty_pat ty_scrut in
-              let* e'                     = infer_at lvl ctx' ty e in
+              let* (ctx', pat') = infer_pat_at lvl tvs ctx  ty_scrut pat in
+              let* e'           = infer_at     lvl     ctx' ty       e   in
               Ok (pat', e'))
             cases
       in
@@ -972,15 +971,14 @@ let new_elaborator () : elaborator =
       map_m error_monad
         (fun (bound_vars, binding) ->
           let (head, args, annot, rhs) = binding in
-          let* (head', ty_head)   = infer_pat_with_vars lvl' tvs ctx bound_vars head in
-          let* (ctx_inner, args') = infer_pats          lvl' tvs ctx_inner args      in
-          let* (rhs', ty_rhs)     = infer               lvl'     ctx_inner rhs       in
-          let* () =
+          let* ty_rhs =
             match annot with
-            | None    -> Ok ()
-            | Some ty -> let* ty' = translate_ast_typ ctx tvs ty in
-                         unify ty_rhs ty'
+            | None    -> Ok (new_uvar lvl' None ())
+            | Some ty -> translate_ast_typ ctx tvs ty
           in
+          let* (head', ty_head)   = infer_pat_with_vars lvl' tvs ctx bound_vars head  in
+          let* (ctx_inner, args') = infer_pats          lvl' tvs ctx_inner args       in
+          let* rhs'               = infer_at            lvl'     ctx_inner ty_rhs rhs in
           let* () =
             unify ty_head (List.fold_right
                             (fun (_, ty1) ty2 -> (ty1 --> ty2))
@@ -996,8 +994,8 @@ let new_elaborator () : elaborator =
             else
               Ok false
           in
-          (* TODO: support type ascriptions in expression position *)
-          Ok (bound_vars, can_generalize, ((head', args', None, rhs') (* : binding *)))
+          let binding' : binding = (head', args', None, rhs') in
+          Ok (bound_vars, can_generalize, binding')
         ) bindings
     in
     let bound_vars : var list =
