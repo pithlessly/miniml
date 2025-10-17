@@ -16,7 +16,7 @@ let show_ty : typ -> string =
                   | Known ty -> go prec ty
                   | Unknown (s, _, lvl) ->
                     fun acc -> ("?" ^ s ^ "(" ^ string_of_int lvl ^ ")") :: acc)
-    | CTCon (CCon ("->", _, _, _), a :: b :: []) ->
+    | CTCon (CCon ("->", _, _, _), [a; b]) ->
       let a = go 1 a and b = go 0 b in
       wrap_if 0 (fun acc -> a (" -> " :: b acc))
     | CTCon (CCon ("*", _, _, _), []) -> fun acc -> "unit" :: acc
@@ -25,7 +25,7 @@ let show_ty : typ -> string =
       wrap_if 1 (fun acc -> a (List.fold_right
                                 (fun arg acc -> " * " :: arg acc) args acc))
     | CTCon (CCon (con, _, _, _), []) -> fun acc -> con :: acc
-    | CTCon (CCon (con, _, _, _), a :: []) ->
+    | CTCon (CCon (con, _, _, _), [a]) ->
       let a = go 2 a in fun acc -> a (" " :: con :: acc)
     | CTCon (CCon (con, _, _, _), a :: args) ->
       let a = go 0 a and args = List.map (go 0) args in
@@ -151,7 +151,7 @@ let initial_ctx
      they have the same ID, but this is only used to distinguish
      them during instantiation *)
   let a = new_qvar "a" () in
-  let qa  = a :: [] and a = CQVar a in
+  let qa  = [a] and a = CQVar a in
   let b = new_qvar "b" () in
   let qab = b :: qa and b = CQVar b in
   let c = new_qvar "c" () in
@@ -189,8 +189,8 @@ let initial_ctx
   in
   top_level (fun add add_con add_ty add_alias add_mod ->
     let ty0 name = CTCon (add_ty name 0, [])
-    and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
-    and ty2 name = let c = add_ty name 2 in fun a b -> CTCon (c, a :: b :: [])
+    and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, [a])
+    and ty2 name = let c = add_ty name 2 in fun a b -> CTCon (c, [a; b])
     in
     let t_tuple_con = add_ty "*" (0 - 1) (* TODO: this feels janky? *) in
     let t_tuple ts = CTCon (t_tuple_con, ts) in
@@ -219,8 +219,8 @@ let initial_ctx
     add "^"   [] (t_string --> (t_string --> t_string));
     add ";"   qa (t_unit --> (a --> a));
     add "min" [] (t_int --> (t_int --> t_int));
-    add "fst" qab (t_tuple (a :: b :: []) --> a);
-    add "snd" qab (t_tuple (a :: b :: []) --> b);
+    add "fst" qab (t_tuple [a; b] --> a);
+    add "snd" qab (t_tuple [a; b] --> b);
     add "int_of_string" [] (t_string --> t_int);
     add "string_of_int" [] (t_int --> t_string);
     add "int_of_char"   [] (t_char --> t_int);
@@ -238,15 +238,15 @@ let initial_ctx
       add ":="    qa (t_ref a --> (a --> t_unit))
     );
     let t_list = ty1 "list" in
-    add_con "::" qa (a :: t_list a :: []) (t_list a);
+    add_con "::" qa [a; t_list a] (t_list a);
     add     "::" qa (a --> (t_list a --> t_list a));
     add     "@"  qa (t_list a --> (t_list a --> t_list a));
     let t_option = ty1 "option" in
     add_con "None" qa [] (t_option a);
-    add_con "Some" qa (a :: []) (t_option a);
+    add_con "Some" qa [a] (t_option a);
     let t_result = ty2 "result" in
-    add_con "Ok"    qab (a :: []) (t_result a b);
-    add_con "Error" qab (b :: []) (t_result a b);
+    add_con "Ok"    qab [a] (t_result a b);
+    add_con "Error" qab [b] (t_result a b);
     add_mod "List" (mk_ctx (fun add _ _ _ _ ->
       add "init"       qa   (t_int --> ((t_int --> a) --> t_list a));
       add "rev"        qa   (t_list a --> t_list a);
@@ -306,7 +306,7 @@ let initial_ctx
     );
     add_mod "StringMap" (mk_ctx (fun add add_con add_ty _ _ ->
       let ty0 name = CTCon (add_ty name 0, [])
-      and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: [])
+      and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, [a])
       in
       let t = ty1 "t" in
       add "empty"     qa  (t a);
@@ -317,12 +317,12 @@ let initial_ctx
       add "map"       qab ((t_string --> (a --> b)) --> (t a --> t b));
       add "fold"      qab ((a --> (t_string --> (b --> a))) --> (a --> (t b --> a)));
       let t_dup_err = ty0 "dup_err" in
-      add_con "DupErr" [] (t_string :: []) t_dup_err;
+      add_con "DupErr" [] [t_string] t_dup_err;
       add "disjoint_union" qa (t a --> (t a --> t_result (t a) (t_dup_err)));
       ()
     ));
     add_mod "IntMap" (mk_ctx (fun add _ add_ty _ _ ->
-      let ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, a :: []) in
+      let ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, [a]) in
       let t = ty1 "t" in
       add "empty"  qa (t a);
       add "lookup" qa (t_int --> (t a --> t_option a));
@@ -372,15 +372,15 @@ let preprocess_constructor_args
   let* args =
     let num_params = List.length param_tys in
     match (num_params, args) with
-    | (0, None)              -> Ok []
-    | (0, Some _)            -> Error (E ("constructor " ^ name ^ " must be applied to 0 arguments"))
-    | (_, None)              -> Error (E ("constructor " ^ name ^ " must be applied to some arguments"))
-    | (1, Some (args :: [])) -> Ok (args :: [])
-    | (1, Some args)         -> Ok (mk_tuple args :: [])
-    | (_, Some args)         -> if num_params = List.length args
-                                then Ok args
-                                else Error (E ("constructor " ^ name
-                                               ^ " is applied to the wrong number of arguments"))
+    | (0, None)        -> Ok []
+    | (0, Some _)      -> Error (E ("constructor " ^ name ^ " must be applied to 0 arguments"))
+    | (_, None)        -> Error (E ("constructor " ^ name ^ " must be applied to some arguments"))
+    | (1, Some [args]) -> Ok [args]
+    | (1, Some args)   -> Ok [mk_tuple args]
+    | (_, Some args)   -> if num_params = List.length args
+                          then Ok args
+                          else Error (E ("constructor " ^ name
+                                         ^ " is applied to the wrong number of arguments"))
   in
   Ok (cv, param_tys, result_ty, args)
 
@@ -918,7 +918,7 @@ let new_elaborator () : elaborator =
       in
       (* desugar to (fun x -> match x with ...) *)
       let param = anon_var ty_arg () in
-      Ok (Fun (PVar param :: [], Match (Var param, cases')))
+      Ok (Fun ([PVar param], Match (Var param, cases')))
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
   and infer_bindings lvl : Ctx.t -> Ast.bindings -> (Ctx.t * bindings) m_result =
     fun ctx (Bindings (is_rec, bindings)) ->
@@ -1038,7 +1038,7 @@ let new_elaborator () : elaborator =
         (fun decl ctx ->
           match decl with
           | Ast.(Let bindings)    -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings in
-                                     Ok (ctx, bindings' :: [])
+                                     Ok (ctx, [bindings'])
           | Ast.(Types decls)     -> let* ctx = translate_ast_typ_decl decls ctx in
                                      Ok (ctx, [])
           | Ast.(Module (
@@ -1076,7 +1076,7 @@ let rec pat_local_vars : pat -> var list =
   | PCon (_, ps) -> List.concat_map pat_local_vars (Option.unwrap ps)
   | PCharLit _ | PIntLit _ | PStrLit _
   | PWild        -> []
-  | PVar v       -> v :: []
+  | PVar v       -> [v]
   | POpenIn (_, _)
                  -> invalid_arg "POpenIn should no longer be present in Core.pat"
   | PAsc (_, vd) -> Void.absurd vd

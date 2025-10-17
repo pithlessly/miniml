@@ -16,7 +16,7 @@ let resolve_precedence (operands: 'a list) (operators: 'o list)
   let rec go prec xs opers =
     match (xs, opers) with
     (* no more operators (end of the input) *)
-    | (x :: [], [])         -> (x, [], [])
+    | ([x],     [])         -> (x, [], [])
     | (x :: xs, o :: opers) ->
       let (o_prec, assoc) = operator_info o in
       if o_prec < prec then
@@ -54,7 +54,7 @@ let resolve_precedence (operands: 'a list) (operators: 'o list)
                                else (acc, xs, o' :: opers)
             | [] -> (acc, xs, [])
           in
-          let (args, xs, opers) = walk_nary (x :: []) xs opers in
+          let (args, xs, opers) = walk_nary [x] xs opers in
           go prec (f (List.rev args) :: xs) opers
       )
     | _ -> invalid_arg "input lists weren't the appropriate lengths"
@@ -142,13 +142,13 @@ let ty_params: string list parser =
   fun input k ->
   match input with
   (* TODO: care about spans in quoted identifiers? *)
-  | IdentQuote (v, _) :: input -> k input (v :: []) (* single variable *)
+  | IdentQuote (v, _) :: input -> k input [v] (* single variable *)
   | OpenParen :: IdentQuote (v1, sp) :: input ->
     let rec go input vs = match input with
                           | Comma :: IdentQuote (v, _) :: input -> go input (v :: vs)
                           | CloseParen :: input -> k input (List.rev vs)
                           | _ -> Error (E "couldn't finish parsing type parameter list")
-    in go input (v1 :: [])
+    in go input [v1]
   | OpenParen :: _ -> Error (E "expected type parameters")
   | _ -> k input []
 let ty_name: string parser =
@@ -159,13 +159,13 @@ let ty_name: string parser =
 let rec ty_atomic: typ parser =
   let rec ty_base input k =
     match input with
-    | IdentQuote (v, sp) :: input -> k input (TVar (v, sp) :: [])
-    | IdentLower (v, sp) :: input -> k input (TCon ([], v, sp, []) :: [])
+    | IdentQuote (v, sp) :: input -> k input [TVar (v, sp)]
+    | IdentLower (v, sp) :: input -> k input [TCon ([], v, sp, [])]
     | IdentUpper (name, _) :: Dot :: input ->
       ty_base input (fun input ts ->
       match ts with
-      | TCon (modules, v, sp, params) :: [] ->
-          k input (TCon (MModule name :: modules, v, sp, params) :: [])
+      | [TCon (modules, v, sp, params)] ->
+          k input [TCon (MModule name :: modules, v, sp, params)]
       | _  -> Error (E "only do 'Module.tycon' please"))
     | OpenParen :: input ->
       let rec go input ts =
@@ -189,12 +189,12 @@ let rec ty_atomic: typ parser =
     in
     tycon [] input (fun input tycon_info_opt ->
     match tycon_info_opt with
-    | Some (modules, v, sp) -> let params' = TCon (modules, v, sp, params) :: [] in
+    | Some (modules, v, sp) -> let params' = [TCon (modules, v, sp, params)] in
                                go input params'
     | None -> match params with
-              | [] -> invalid_arg "should be impossible"
-              | t :: [] -> k input t
-              | _ -> Error (E "you may have been trying to use Haskell tuple syntax"))
+              | []  -> invalid_arg "should be impossible"
+              | [t] -> k input t
+              | _   -> Error (E "you may have been trying to use Haskell tuple syntax"))
   in ty_base input go
 and ty: typ parser =
   fun input k ->
@@ -216,7 +216,7 @@ and ty: typ parser =
           (List.rev ty_operands)
           (List.rev ty_operators)
           (function
-           | "->" -> (0, AssocRight (fun l r -> TCon ([], "->", dummy_span, l :: r :: [])))
+           | "->" -> (0, AssocRight (fun l r -> TCon ([], "->", dummy_span, [l; r])))
            | "*"  -> (1, AssocNone (fun ts -> TCon ([], "*", dummy_span, ts)))
            | _    -> invalid_arg "should be impossible")
       in k input ty_expr)
@@ -362,7 +362,7 @@ and pattern2 : pat option parser = fun input k ->
       match constructor_args_opt with
       | None               -> Some (PCon (constructor, None))
       | Some (PTuple args) -> Some (PCon (constructor, Some args))
-      | Some pat           -> Some (PCon (constructor, Some (pat :: [])))
+      | Some pat           -> Some (PCon (constructor, Some [pat]))
     ))
   (* application isn't a pattern, so we don't have to worry about it :) *)
   | _ -> pattern3 input k
@@ -389,7 +389,7 @@ and pattern1 : pat option parser = fun input k ->
     let result = resolve_precedence operands operators (
       function
       | "|"  -> (0, AssocLeft (fun a b -> POr (a, b)))
-      | "::" -> (1, AssocRight (fun a b -> PCon (("::", dummy_span), Some (a :: b :: []))))
+      | "::" -> (1, AssocRight (fun a b -> PCon (("::", dummy_span), Some [a; b])))
       | _    -> invalid_arg "impossible operator")
     in
     k input (Some result)))
@@ -406,7 +406,7 @@ and pattern0 : pat parser = fun input k ->
   in
   many next_operand input (fun input (operands: pat list) ->
   let pat = match first_operand :: operands with
-            | single :: [] -> single
+            | [single]     -> single
             | many         -> PTuple many
   in
   (* type ascription *)
@@ -448,7 +448,7 @@ and expr1' fallback : expr option parser = fun input k ->
            force_expr0                       @>
       fin (fun pat () rhs () rest -> Some (
         App (App (Var ("let" ^ s, sp), rhs),
-             Fun (pat :: [], rest))
+             Fun ([pat], rest))
       )))
     in
     p' input k
@@ -569,7 +569,7 @@ and expr3 = fun input k ->
       match constructor_args_opt with
       | None              -> Some (Con (constructor, None))
       | Some (Tuple args) -> Some (Con (constructor, Some args))
-      | Some e            -> Some (Con (constructor, Some (e :: [])))
+      | Some e            -> Some (Con (constructor, Some [e]))
     ))
   | _ ->
     expr4 input (fun input head_exp_opt ->

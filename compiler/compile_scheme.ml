@@ -30,7 +30,7 @@ and go_str s =
                         invalid_arg ("we don't yet support this character code: "
                                     ^ string_of_int code)
     in go (c :: acc) (i - 1)
-  in go ("\"" :: []) (String.length s - 1)
+  in go ["\""] (String.length s - 1)
 
 let safe_in_scheme_identifiers = function
   | '\'' -> false
@@ -109,16 +109,16 @@ let scheme (_ : Elab.elaborator) (decls : core) =
         match (name, ps) with
         | ("true",  []) -> "scrutinee"
         | ("false", []) -> "(not scrutinee)"
-        | ("::", p1 :: p2 :: []) ->
+        | ("::", [p1; p2]) ->
           "(and (pair? scrutinee)" ^
               " (let ((scrutinee (car scrutinee))) " ^
                   go_pat p1 ^ ")" ^
               " (let ((scrutinee (cdr scrutinee))) " ^
                   go_pat p2 ^ "))"
-        | ("None",      []) -> "(null? scrutinee)"
-        | ("Some", p :: []) -> "(and (pair? scrutinee)" ^
-                                   " (let ((scrutinee (car scrutinee))) " ^
-                                       go_pat p ^ "))"
+        | ("None", [])  -> "(null? scrutinee)"
+        | ("Some", [p]) -> "(and (pair? scrutinee)" ^
+                               " (let ((scrutinee (car scrutinee))) " ^
+                                   go_pat p ^ "))"
         (* TODO: DupErr could use newtype layout *)
         | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
         | (_, ps) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
@@ -155,10 +155,10 @@ let scheme (_ : Elab.elaborator) (decls : core) =
       | CBinding (name, _, User, _, _, _) -> vector_layout ()
       | CBinding (name, _, Builtin _, _, _, _) ->
         match (name, es) with
-        | ("true",  []) -> (true, "#t")
-        | ("false", []) -> (true, "#f")
-        | ("None",      []) -> (true, "'()")
-        | ("Some", e :: []) -> (true, "(list " ^ go_expr_pure e ^ ")")
+        | ("true",  [])  -> (true, "#t")
+        | ("false", [])  -> (true, "#f")
+        | ("None",  [])  -> (true, "'()")
+        | ("Some",  [e]) -> (true, "(list " ^ go_expr_pure e ^ ")")
         (* TODO: DupErr could use newtype layout *)
         | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
         | (_, es) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
@@ -234,7 +234,7 @@ let scheme (_ : Elab.elaborator) (decls : core) =
       (true, tv)
     | Fun ([], body) ->
       go_expr body
-    | Fun (arg :: [], body) ->
+    | Fun ([arg], body) ->
       let tv = tmp_var () in
       emit_ln ("(define " ^ tv ^ " (lambda (scrutinee)");
       indent 2 (fun () ->
@@ -245,7 +245,7 @@ let scheme (_ : Elab.elaborator) (decls : core) =
       );
       (true, tv)
     | Fun (arg :: args, body) ->
-      go_expr (Fun (arg :: [], Fun (args, body)))
+      go_expr (Fun ([arg], Fun (args, body)))
     | Function _ ->
       invalid_arg "Function should no longer be present in Core.expr"
   and go_expr_pure : expr -> string =
