@@ -733,55 +733,13 @@ let new_elaborator () : elaborator =
     let* (ctx', p') = infer_pat_at lvl tvs ctx ty pat in
     Ok (ctx', (p', ty))
   in
-  (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
-  let infer_pats lvl tvs : Ctx.t -> Ast.pat list -> (Ctx.t * (pat * typ) list) m_result =
-    Fun.flip (map_m error_state_monad (Fun.flip (infer_pat lvl tvs)))
+  (* TODO: enforce statically that these only extend the topmost layer of `ctx` *)
+  let infer_pats_at lvl tvs : Ctx.t -> (Ast.pat * typ) list -> (Ctx.t * pat list) m_result =
+    Fun.flip (map_m error_state_monad (fun (pat, ty) ctx -> infer_pat_at lvl tvs ctx ty pat))
+  and infer_pats lvl tvs : Ctx.t -> Ast.pat list -> (Ctx.t * (pat * typ) list) m_result =
+    Fun.flip (map_m error_state_monad (fun pat ctx -> infer_pat lvl tvs ctx pat))
   in
-  let rec infer lvl ctx : Ast.expr -> (expr * typ) m_result =
-    fun expr -> match expr with
-    | Tuple _
-    | List _
-    | Con (_, _)
-    | CharLit _
-    | IntLit _
-    | StrLit _
-    | Var _
-    | OpenIn (_, _)
-    | Project (_, _)
-    | MkRecord _
-    | App (_, _)
-    | LetIn (_, _)
-    | Match (_, _)
-    | IfThenElse (_, _, _)
-      -> infer' lvl ctx expr
-    | Fun (pats, e) ->
-      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
-      let* (ctx', pats') = infer_pats lvl tvs ctx pats in
-      let* (e', ty_res) = infer lvl ctx' e in
-      Ok (
-        Fun (List.map fst pats', e'),
-        List.fold_right (fun (_, ty1) ty2 -> (ty1 --> ty2)) pats' ty_res
-      )
-    | Function cases ->
-      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
-      let ty_res = new_uvar lvl None () in
-      let ty_arg = new_uvar lvl None () in
-      let* cases' =
-        map_m error_monad
-            (fun (pat, e) ->
-              let* (ctx', (pat', ty_pat)) = infer_pat lvl tvs ctx pat in
-              let* ()                     = unify ty_pat ty_arg       in
-              let* (e', ty_e)             = infer lvl ctx' e          in
-              let* ()                     = unify ty_e ty_res         in
-              Ok (pat', e'))
-            cases
-      in
-      let param = anon_var ty_arg () in
-      Ok (
-        Fun (PVar param :: [], Match (Var param, cases')),
-        ground ty_arg --> ground ty_res
-      )
-  and infer' lvl ctx (e : Ast.expr) : (expr * typ) m_result =
+  let rec infer' lvl ctx (e : Ast.expr) : (expr * typ) m_result =
     let ty_res = new_uvar lvl None () in
     let* e' = infer_at lvl ctx ty_res e in
     Ok (e', ground ty_res)
@@ -933,11 +891,34 @@ let new_elaborator () : elaborator =
       let* e2' = infer_at lvl ctx ty     e2 in
       let* e3' = infer_at lvl ctx ty     e3 in
       Ok (IfThenElse (e1', e2', e3'))
-    (* missing cases: Fun, Function *)
-    | expr ->
-      let* (e', e_ty) = infer lvl ctx expr in
-      let* () = unify ty e_ty in
-      Ok e'
+    | Fun (pats, e) ->
+      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
+      let return_ty = new_uvar lvl None () in
+      let pats : (Ast.pat * typ) list = new_uvars lvl None pats () in
+      let* () =
+        unify ty (List.fold_right
+                    (fun (_, ty1) ty2 -> (ty1 --> ty2))
+                    pats return_ty)
+      in
+      let* (ctx', pats') = infer_pats_at lvl tvs ctx pats in
+      let* e' = infer_at lvl ctx' return_ty e in
+      Ok (Fun (pats', e'))
+    | Function cases ->
+      let tvs = tvs_new_dynamic (fun s -> new_uvar lvl (Some s) ()) () in
+      let ty_res = new_uvar lvl None () in
+      let ty_arg = new_uvar lvl None () in
+      let* () = unify ty (ty_arg --> ty_res) in
+      let* cases' =
+        map_m error_monad
+            (fun (pat, e) ->
+              let* (ctx', pat') = infer_pat_at lvl tvs ctx  ty_arg pat in
+              let* e'           = infer_at     lvl     ctx' ty_res e   in
+              Ok (pat', e'))
+            cases
+      in
+      (* desugar to (fun x -> match x with ...) *)
+      let param = anon_var ty_arg () in
+      Ok (Fun (PVar param :: [], Match (Var param, cases')))
   (* TODO: enforce statically that this only extends the topmost layer of `ctx` *)
   and infer_bindings lvl : Ctx.t -> Ast.bindings -> (Ctx.t * bindings) m_result =
     fun ctx (Bindings (is_rec, bindings)) ->
