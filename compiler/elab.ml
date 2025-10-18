@@ -164,13 +164,15 @@ let initial_ctx
   let rec mk_ctx callback prefix =
     let ctx = ref Ctx.empty_layer in
     let provenance = Builtin prefix in
-    let add name qvars ty =
+    let add name type_params ty =
       ctx := Ctx.layer_extend (deref ctx)
-               (Binding (name, next_var_id (), provenance, qvars, ty))
+               { name; id = next_var_id (); provenance;
+                 type_params; ty }
     in
-    let add_con name qvars params result =
+    let add_con name type_params param_tys adt_ty =
       ctx := Ctx.layer_extend_con (deref ctx)
-               (CBinding (name, next_var_id (), provenance, qvars, params, result))
+               { name; id = next_var_id (); provenance;
+                 type_params; param_tys; adt_ty }
     in
     let add_ty name arity =
       let con : con = { name; id = next_con_id (); arity; info = CIDatatype } in
@@ -367,10 +369,9 @@ let preprocess_constructor_args
     | None    -> Error (err_sp ("constructor not in scope: " ^ name) sp)
     | Some cv -> Ok cv
   in
-  let (CBinding (_, _, _, qvars, param_tys, result_tys)) = cv in
-  let instantiate = instantiate qvars () in
-  let param_tys = List.map instantiate param_tys in
-  let result_ty = instantiate result_tys in
+  let instantiate = instantiate cv.type_params () in
+  let param_tys = List.map instantiate cv.param_tys in
+  let result_ty = instantiate cv.adt_ty in
   (* make sure we're applying the constructor to the right number of arguments.
      as a special case, passing the "wrong" number of arguments to a 1-param
      tuple, like `Some (1, 2)`, causes it to be treated as a tuple. *)
@@ -475,7 +476,8 @@ let new_elaborator () : elaborator =
     ) xs
   in
   let anon_var ty () : var =
-    Binding ("<anonymous>", next_var_id (), User, [], ty)
+    { name = "<anonymous>"; id = next_var_id ();
+      provenance = User; type_params = []; ty }
   in
   let translate_ast_typ ctx (tvs : tvs) : Ast.typ -> typ m_result =
     (* substitute N types for N variables (qvars) in typ *)
@@ -533,19 +535,19 @@ let new_elaborator () : elaborator =
           (add_aliases : Ctx.t -> Ctx.t m_result),
           (add_terms   : Ctx.t -> Ctx.t m_result))
     = fold_left_m error_monad (fun (prev_add_adts, prev_add_aliases, prev_add_terms)
-                                   (ty_params, name, decl) ->
-        let arity = List.length ty_params in
-        let ty_params_qvs = List.map (fun s -> (s, new_qvar s ())) ty_params in
-        let* (ty_params_map : typ StringMap.t) =
+                                   (type_params, name, decl) ->
+        let arity = List.length type_params in
+        let type_params_qvs = List.map (fun s -> (s, new_qvar s ())) type_params in
+        let* (type_params_map : typ StringMap.t) =
           fold_left_m error_monad (fun acc (s, qv) ->
             match StringMap.insert s (CQVar qv) acc with
             | Some map -> Ok map
             | None -> Error (E ("type declaration " ^ name ^
                                 " has duplicate type parameter '" ^ s))
-          ) StringMap.empty ty_params_qvs
+          ) StringMap.empty type_params_qvs
         in
-        let tvs = tvs_from_map ty_params_map in
-        let ty_params = List.map snd ty_params_qvs in
+        let tvs = tvs_from_map type_params_map in
+        let type_params = List.map snd type_params_qvs in
         (* check that this type constructor is not already in scope --
            this is not strictly necessary *)
         let* () = match Ctx.lookup_ty name ctx with
@@ -564,7 +566,7 @@ let new_elaborator () : elaborator =
             Ok (Ctx.extend_ty ctx (CNominal con))
           in
           (* stage 3 *)
-          let return_type = CTCon (con, List.map (fun qv -> CQVar qv) ty_params) in
+          let adt_ty = CTCon (con, List.map (fun qv -> CQVar qv) type_params) in
           let add_terms ctx =
             let* ctx = prev_add_terms ctx in
             fold_left_m error_monad (fun ctx (name, param_tys) ->
@@ -574,13 +576,14 @@ let new_elaborator () : elaborator =
                         | None   -> Ok () in
               let* param_tys' = map_m error_monad (translate_ast_typ ctx tvs)
                                                   param_tys
-              in Ok (Ctx.extend_con ctx (
-                CBinding (name,
-                          next_var_id (),
-                          User,
-                          ty_params,
-                          param_tys',
-                          return_type)))
+              in Ok (Ctx.extend_con ctx {
+                name;
+                id = next_var_id ();
+                provenance = User;
+                type_params;
+                param_tys = param_tys';
+                adt_ty;
+              })
             ) ctx constructors
           in Ok (add_adts, prev_add_aliases, add_terms)
         | Ast.(Record []) ->
@@ -596,7 +599,7 @@ let new_elaborator () : elaborator =
             Ok (Ctx.extend_ty ctx (CNominal con))
           in
           (* stage 3 *)
-          let record_ty = CTCon (con, List.map (fun qv -> CQVar qv) ty_params) in
+          let record_ty = CTCon (con, List.map (fun qv -> CQVar qv) type_params) in
           let add_terms ctx =
             let* ctx = prev_add_terms ctx in
             let* (_, fields') =
@@ -609,7 +612,7 @@ let new_elaborator () : elaborator =
                         name;
                         id = next_var_id ();
                         position = idx;
-                        type_params = ty_params;
+                        type_params;
                         record_ty;
                         field_ty;
                       }
@@ -628,7 +631,7 @@ let new_elaborator () : elaborator =
             let* ty' = translate_ast_typ ctx tvs ty in
             Ok (Ctx.extend_ty ctx (
               CAlias (con,
-                      ty_params,
+                      type_params,
                       ty')))
           in Ok (prev_add_adts, add_aliases, prev_add_terms)
       ) ((fun c -> Ok c), (fun c -> Ok c), (fun c -> Ok c)) decls
@@ -718,9 +721,10 @@ let new_elaborator () : elaborator =
          this is responsible for the difference in behavior between stage1 and stage2.
          It may be a good idea to change this to be consistent. *)
       Ok (StringMap.map
-        (fun s () ->
-          Binding (s, next_var_id (), User, [], new_uvar lvl (Some s) ())
-        ) bindings)
+        (fun name () -> {
+          name; id = next_var_id (); provenance = User;
+          type_params = []; ty = new_uvar lvl (Some name) ();
+        }) bindings)
   (* TODO: exhaustiveness checking? *)
   and infer_pat_with_vars_at lvl tvs ctx (bindings : var StringMap.t) :
                              typ -> Ast.pat -> pat m_result =
@@ -758,11 +762,10 @@ let new_elaborator () : elaborator =
       | PStrLit c    -> let* () = unify ty t_string in Ok (PStrLit c)
       | PVar (s, sp) -> (match StringMap.lookup s bindings with
                          | None   -> Error (err_sp ("unexpected variable in pattern: " ^ s) sp)
-                         | Some v -> let (Binding (_, _, _, qvars, ty_v)) = v in
-                                     let () = match qvars with
+                         | Some v -> let () = match v.type_params with
                                               | [] -> ()
-                                              | _  -> invalid_arg "impossible: qvars should be empty here" in
-                                     let* () = unify ty_v ty in
+                                              | _  -> invalid_arg "impossible: pattern var should have no type_params" in
+                                     let* () = unify ty v.ty in
                                      Ok (PVar v))
       | POpenIn (MModule name, p)
                      -> (match Ctx.extend_open_over ctx name with
@@ -858,9 +861,7 @@ let new_elaborator () : elaborator =
       match Ctx.lookup s ctx with
       | None -> Error (err_sp ("variable not in scope " ^ s) sp)
       | Some v ->
-        let (Binding (_, _, _, qvars, ty_v)) = v in
-        let ty_v = instantiate lvl qvars () ty_v in
-        let* () = unify ty_v ty in
+        let* () = unify ty (instantiate lvl v.type_params () v.ty) in
         Ok (Var v))
     | OpenIn (MModule name, e) -> (
       match Ctx.extend_open_over ctx name with
@@ -1036,19 +1037,18 @@ let new_elaborator () : elaborator =
         (Miniml.debug (fun () ->
           "defined: " ^
             (String.concat "," (
-              List.map (fun (Binding (n, _, _, _, ty)) ->
-                n^":"^(show_ty ty)) bound_vars)));
+              List.map (fun ({ name; ty; _ } : var) ->
+                name ^ ":" ^ show_ty ty) bound_vars)));
          bound_vars)
       else
-        let types = List.map (fun (Binding (_, _, _, _, ty)) -> ty) bound_vars in
+        let types = List.map (fun (v : var) -> v.ty) bound_vars in
         let (qvars, types) = generalize lvl types in
         Miniml.debug (fun () ->
           "defined(gen): " ^
             (String.concat "," (
-              List.map (fun (Binding (n, _, _, _, ty)) ->
-                n^":"^(show_ty ty)) bound_vars)));
-        List.map2 (fun var ty ->
-          let (Binding (name, id, prov, _, _)) = var in
+              List.map (fun ({ name; ty; _ } : var) ->
+                name ^ ":" ^ show_ty ty) bound_vars)));
+        List.map2 (fun (var : var) ty ->
           (* NOTE: What's going on here? We are allocating a "new" variable,
           but giving it the same ID as the above. This is fine, because (since
           generalization mutates the types it encounters, replacing the uvars
@@ -1062,7 +1062,8 @@ let new_elaborator () : elaborator =
           However, this does feel a little inelegant, and it would be nice to
           avoid it, e.g. by making the qvar list in Binding be a ref. *)
           (* TODO: maybe trim the qvars to those which appear in the ty? *)
-          Binding (name, id, prov, qvars, ty)
+          { name = var.name; id = var.id; provenance = var.provenance;
+            type_params = qvars; ty }
         ) bound_vars types
     in
     let bindings = List.map (fun (_, _, binding) -> binding) bindings in

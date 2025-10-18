@@ -36,8 +36,8 @@ let safe_in_scheme_identifiers = function
   | '\'' -> false
   | _    -> true
 
-let go_var (Binding (name, id, prov, _, _)) =
-  match prov with
+let go_var ({ name; id; provenance; _ } : var) =
+  match provenance with
   | User ->
     (* TODO: don't recompute this every time we have to compile a variable *)
     "v" ^ String.filter safe_in_scheme_identifiers name ^ "-" ^ string_of_int id
@@ -47,8 +47,8 @@ let go_var (Binding (name, id, prov, _, _)) =
     | "::" -> "miniml-cons"
     | _    -> "miniml-" ^ prefix ^ name
 
-let go_cvar (CBinding (name, id, prov, _, _, _)) =
-  match (prov, name) with
+let go_cvar ({ provenance; name; id; _ } : cvar) =
+  match (provenance, name) with
   (* TODO: avoid special casing these constructors *)
   | (Builtin "StringMap.", "DupErr")
   | (Builtin "", ("Error" | "Ok")) -> "'" ^ name
@@ -91,22 +91,22 @@ let scheme (_ : Elab.elaborator) (decls : core) =
       "(and (pair? scrutinee) " ^
           " (let ((scrutinee (car scrutinee))) " ^ go_pat p          ^ ")" ^
           " (let ((scrutinee (cdr scrutinee))) " ^ go_pat (PList ps) ^ "))"
-    | PCon (c, ps) ->
+    | PCon (cv, ps) ->
       let ps = Option.unwrap ps in
       let vector_layout () =
         match ps with
-        | [] -> "(eq? scrutinee " ^ go_cvar c ^ ")"
+        | [] -> "(eq? scrutinee " ^ go_cvar cv ^ ")"
         | _ ->
-          "(and (vector? scrutinee) (eq? (vector-ref scrutinee 0) " ^ go_cvar c ^ ")" ^ (String.concat ""
+          "(and (vector? scrutinee) (eq? (vector-ref scrutinee 0) " ^ go_cvar cv ^ ")" ^ (String.concat ""
             (List.mapi
               (fun idx p ->
                 " (let ((scrutinee (vector-ref scrutinee " ^ string_of_int (idx + 1) ^ "))) "
                 ^ go_pat p ^ ")") ps)) ^ ")"
       in (
-      match c with
-      | CBinding (name, _, User, _, _, _) -> vector_layout ()
-      | CBinding (name, _, Builtin _, _, _, _) ->
-        match (name, ps) with
+      match cv.provenance with
+      | User -> vector_layout ()
+      | Builtin _ ->
+        match (cv.name, ps) with
         | ("true",  []) -> "scrutinee"
         | ("false", []) -> "(not scrutinee)"
         | ("::", [p1; p2]) ->
@@ -121,7 +121,7 @@ let scheme (_ : Elab.elaborator) (decls : core) =
                                    go_pat p ^ "))"
         (* TODO: DupErr could use newtype layout *)
         | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
-        | (_, ps) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
+        | (_, ps) -> invalid_arg ("unsupported builtin constructor: " ^ cv.name ^ "/"
                            ^ string_of_int (List.length ps)))
     | PCharLit c -> "(char=? scrutinee " ^ go_char c ^ ")"
     | PIntLit i -> "(= scrutinee " ^ go_int i ^ ")"
@@ -146,27 +146,27 @@ let scheme (_ : Elab.elaborator) (decls : core) =
       (true,
         List.fold_right (fun e acc -> "(cons " ^ e ^ " " ^ acc ^ ")")
           (List.map go_expr_pure es) "'()")
-    | Con (c, es) ->
+    | Con (cv, es) ->
       let es = Option.unwrap es in
       let vector_layout () =
         (true,
           match es with
-          | [] -> go_cvar c
+          | [] -> go_cvar cv
           | _ ->
-            "(vector " ^ go_cvar c ^ (String.concat ""
+            "(vector " ^ go_cvar cv ^ (String.concat ""
               (List.map (fun e -> " " ^ go_expr_pure e) es)) ^ ")")
       in (
-      match c with
-      | CBinding (name, _, User, _, _, _) -> vector_layout ()
-      | CBinding (name, _, Builtin _, _, _, _) ->
-        match (name, es) with
+      match cv.provenance with
+      | User -> vector_layout ()
+      | Builtin _ ->
+        match (cv.name, es) with
         | ("true",  [])  -> (true, "#t")
         | ("false", [])  -> (true, "#f")
         | ("None",  [])  -> (true, "'()")
         | ("Some",  [e]) -> (true, "(list " ^ go_expr_pure e ^ ")")
         (* TODO: DupErr could use newtype layout *)
         | (("Ok" | "Error" | "DupErr"), _) -> vector_layout ()
-        | (_, es) -> invalid_arg ("unsupported builtin constructor: " ^ name ^ "/"
+        | (_, es) -> invalid_arg ("unsupported builtin constructor: " ^ cv.name ^ "/"
                            ^ string_of_int (List.length es)))
     | CharLit c -> (true, go_char c)
     | IntLit i -> (true, go_int i)

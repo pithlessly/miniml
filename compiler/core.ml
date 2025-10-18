@@ -7,18 +7,22 @@ type prov = | User
             | Builtin of string (* module prefix *)
 
 (* ordinary variable binding *)
-type var  = | Binding of string    (* name in the syntax *)
-                       * var_id    (* numeric ID *)
-                       * prov      (* user-defined or builtin? *)
-                       * qvar list (* forall parameters *)
-                       * typ       (* type *)
+type var  = {
+              name : string;
+              id : var_id;
+              provenance : prov;
+              type_params : qvar list;
+              ty : typ;
+            }
 (* constructor variable binding *)
-and  cvar = | CBinding of string    (* name in the syntax *)
-                        * var_id    (* numeric ID *)
-                        * prov      (* user-defined or builtin? *)
-                        * qvar list (* forall parameters *)
-                        * typ list  (* parameter types *)
-                        * typ       (* return type *)
+and  cvar = {
+              name : string;
+              id : var_id;
+              provenance : prov;
+              type_params : qvar list;
+              param_tys : typ list;
+              adt_ty : typ;
+            }
 (* field binding *)
 and  field = {
               name : string;

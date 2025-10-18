@@ -17,9 +17,9 @@ let find : (layer -> 'a list) -> ('a -> string) -> string -> t -> 'a option =
                                     | Some p -> go p
     in go
 let lookup     : string -> t ->    Core.var option = find (fun (vars, _, _, _, _) -> vars)
-                                                          (fun Core.(Binding (name, _, _, _, _)) -> name)
+                                                          (fun v -> v.name)
 let lookup_con : string -> t ->   Core.cvar option = find (fun (_, cvars, _, _, _) -> cvars)
-                                                          (fun Core.(CBinding (name, _, _, _, _, _)) -> name)
+                                                          (fun cv -> cv.name)
 let lookup_fld : string -> t ->  Core.field option = find (fun (_, _, fields, _, _) -> fields)
                                                           (fun field -> field.name)
 let lookup_ty  : string -> t -> Core.tydecl option = find (fun (_, _, _, cons, _) -> cons)
