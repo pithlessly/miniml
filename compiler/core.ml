@@ -31,10 +31,12 @@ and  typ  = | CQVar of qvar
             | CTCon of con * typ list
 and  uvar = | Unknown of string * var_id * level
             | Known   of typ
-and  con  = | CCon of string
-                    * con_id
-                    * int (* arity *)
-                    * con_info
+and  con  = {
+              name : string;
+              id : con_id;
+              arity : int;
+              info : con_info;
+            }
 and  con_info =
             | CIAlias
             | CIDatatype

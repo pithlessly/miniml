@@ -16,23 +16,23 @@ let show_ty : typ -> string =
                   | Known ty -> go prec ty
                   | Unknown (s, _, lvl) ->
                     fun acc -> ("?" ^ s ^ "(" ^ string_of_int lvl ^ ")") :: acc)
-    | CTCon (CCon ("->", _, _, _), [a; b]) ->
+    | CTCon ({ name = "->"; _ }, [a; b]) ->
       let a = go 1 a and b = go 0 b in
       wrap_if 0 (fun acc -> a (" -> " :: b acc))
-    | CTCon (CCon ("*", _, _, _), []) -> fun acc -> "unit" :: acc
-    | CTCon (CCon ("*", _, _, _), a :: args) ->
+    | CTCon ({ name = "*"; _ }, []) -> fun acc -> "unit" :: acc
+    | CTCon ({ name = "*"; _ }, a :: args) ->
       let a = go 2 a and args = List.map (go 2) args in
       wrap_if 1 (fun acc -> a (List.fold_right
                                 (fun arg acc -> " * " :: arg acc) args acc))
-    | CTCon (CCon (con, _, _, _), []) -> fun acc -> con :: acc
-    | CTCon (CCon (con, _, _, _), [a]) ->
-      let a = go 2 a in fun acc -> a (" " :: con :: acc)
-    | CTCon (CCon (con, _, _, _), a :: args) ->
+    | CTCon ({ name; _ }, []) -> fun acc -> name :: acc
+    | CTCon ({ name; _ }, [a]) ->
+      let a = go 2 a in fun acc -> a (" " :: name :: acc)
+    | CTCon ({ name; _ }, a :: args) ->
       let a = go 0 a and args = List.map (go 0) args in
       fun acc -> "(" :: a (List.fold_right
                             (fun arg acc -> ", " :: arg acc)
                             args
-                            (") " :: con :: acc))
+                            (") " :: name :: acc))
   in fun ty -> String.concat "" (go 0 ty [])
 
 (* A type variable scope, or tvs, is responsible for assigning each syntactic type variable
@@ -122,9 +122,8 @@ let rec unify : typ -> typ -> unit m_result = fun t1 t2 ->
       let* () = occurs_check r t' in
       Ok (r := Known t')
   | (CTCon (c1, p1), CTCon (c2, p2)) ->
-    let (CCon (n1, id1, _, _)) = c1 and (CCon (n2, id2, _, _)) = c2 in
-    if id1 <> id2 then
-      Error (E ("cannot unify different type constructors: " ^ n1 ^ " != " ^ n2))
+    if c1.id <> c2.id then
+      Error (E ("cannot unify different type constructors: " ^ c1.name ^ " != " ^ c2.name))
     else unify_all p1 p2
 and unify_all : typ list -> typ list -> unit m_result = fun ts1 ts2 ->
   match (ts1, ts2) with
@@ -174,12 +173,12 @@ let initial_ctx
                (CBinding (name, next_var_id (), provenance, qvars, params, result))
     in
     let add_ty name arity =
-      let con = CCon (name, next_con_id (), arity, CIDatatype) in
+      let con : con = { name; id = next_con_id (); arity; info = CIDatatype } in
       (ctx := Ctx.layer_extend_ty (deref ctx) (CNominal con); con)
     in
     let add_alias name def =
       let arity = 0 in (* the stdlib only needs nullary aliases *)
-      let con = CCon (name, next_con_id (), arity, CIAlias) in
+      let con : con = { name; id = next_con_id (); arity; info = CIAlias } in
       (ctx := Ctx.layer_extend_ty (deref ctx) (CAlias (con, [], def)); def)
     in
     let add_mod name m =
@@ -402,7 +401,7 @@ let visit_record_fields
      immediately. Otherwise, we have to wait until we see the first field. *)
   let record_info_ref : (string * field list) option ref =
     ref (match ground ty with
-         | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _)
+         | CTCon ({ name = record_name; info = CIRecord (fs_ref : field list ref); _ }, _)
              -> Some (record_name, deref fs_ref)
          | _ -> None)
   in
@@ -420,7 +419,7 @@ let visit_record_fields
           in
           let (Field (_, _, _, _, record_ty, _)) = field in
           match ground record_ty with
-          | CTCon (CCon (record_name, _, _, CIRecord (fs_ref : field list ref)), _) ->
+          | CTCon ({ name = record_name; info = CIRecord (fs_ref : field list ref); _ }, _) ->
             (match deref fs_ref with
              | [] -> invalid_arg "impossible: record cannot have empty list of fields"
              | fields -> Ok (record_name, fields))
@@ -508,10 +507,9 @@ let new_elaborator () : elaborator =
         | None -> Error (E ("type constructor not in scope: " ^ name))
         | Some decl ->
           let (CNominal con | CAlias (con, _, _)) = decl in
-          let (CCon (_, _, arity, _)) = con in
-          if arity <> List.length args && arity >= 0 then
+          if con.arity >= 0 && con.arity <> List.length args then
             Error (err_sp ("type constructor " ^ name ^ " expects "
-                            ^ string_of_int arity ^ " argument(s)") sp)
+                            ^ string_of_int con.arity ^ " argument(s)") sp)
           else
             let* args' = map_m error_monad (go ctx) args in
             match decl with
@@ -556,12 +554,12 @@ let new_elaborator () : elaborator =
                   | Some _ -> Error (E ("duplicate type name: " ^ name))
                   | None   -> Ok ()
         in
-        let make_con (info : con_info) : con =
-          CCon (name, next_con_id (), arity, info)
+        let make_con (info : con_info) () : con =
+          { name; id = next_con_id (); arity; info }
         in
         match decl with
         | Ast.(Datatype constructors) ->
-          let con = make_con CIDatatype in
+          let con = make_con CIDatatype () in
           (* stage 1 *)
           let add_adts ctx =
             let* ctx = prev_add_adts ctx in
@@ -593,7 +591,7 @@ let new_elaborator () : elaborator =
           (* we need to have the `con_info` immediately, but we don't actually want
              to calculate the field types until later, so we initially make it empty *)
           let fields_ref : field list ref = ref [] in
-          let con = make_con (CIRecord fields_ref) in
+          let con = make_con (CIRecord fields_ref) () in
           (* stage 1 *)
           let add_adts ctx =
             let* ctx = prev_add_adts ctx in
@@ -622,7 +620,7 @@ let new_elaborator () : elaborator =
             Ok (List.fold_left Ctx.extend_fld ctx fields')
           in Ok (add_adts, prev_add_aliases, add_terms)
         | Ast.(Alias ty) ->
-          let con = make_con CIAlias in
+          let con = make_con CIAlias () in
           (* stage 2 *)
           let add_aliases ctx =
             let* ctx = prev_add_aliases ctx in
@@ -875,11 +873,11 @@ let new_elaborator () : elaborator =
         match ground e_ty with
         | CQVar qv -> Error (unexpected_qvar qv)
         | CUVar _  -> Error (err_sp "cannot project out of expression of unknown type" sp)
-        | CTCon (CCon (con_name, _, _, con_info), args) ->
-          match con_info with
+        | CTCon (con, args) ->
+          match con.info with
           | CIAlias    -> Error (E "should be impossible to find a type alias here?")
           | CIDatatype -> Error (E "cannot project out of a datatype")
-          | CIRecord fields -> Ok (con_name, fields, args)
+          | CIRecord fields -> Ok (con.name, fields, args)
       in
       let* field =
         match
