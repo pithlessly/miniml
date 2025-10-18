@@ -33,6 +33,7 @@ and go_str s =
   in go ["\""] (String.length s - 1)
 
 let safe_in_scheme_identifiers = function
+  | '|'
   | '\'' -> false
   | _    -> true
 
@@ -43,6 +44,7 @@ let go_var ({ name; id; provenance; _ } : var) =
     "v" ^ String.filter safe_in_scheme_identifiers name ^ "-" ^ string_of_int id
   | Builtin prefix ->
     match name with
+    | "||" -> "miniml-or"
     | ";"  -> "miniml-semicolon"
     | "::" -> "miniml-cons"
     | _    -> "miniml-" ^ prefix ^ name
