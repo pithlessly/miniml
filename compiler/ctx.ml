@@ -1,13 +1,15 @@
 type module_ = { name : string;
                  layer : layer }
-and  layer =    Core.var list
-           *   Core.cvar list
-           *  Core.field list
-           * Core.tydecl list
-           *     module_ list
+and  layer = {
+  vars    :     Core.var list;
+  cvars   :    Core.cvar list;
+  fields  :   Core.field list;
+  tydecls :  Core.tydecl list;
+  modules :      module_ list;
+}
 type t = { top : layer;
            parent : t option }
-let empty_layer : layer = ([], [], [], [], [])
+let empty_layer : layer = { vars = []; cvars = []; fields = []; tydecls = []; modules = [] }
 let find : (layer -> 'a list) -> ('a -> string) -> string -> t -> 'a option =
   fun get_list get_name name ->
     let rec go { top; parent } =
@@ -16,22 +18,22 @@ let find : (layer -> 'a list) -> ('a -> string) -> string -> t -> 'a option =
       | None   -> match parent with | None -> None
                                     | Some p -> go p
     in go
-let lookup     : string -> t ->    Core.var option = find (fun (vars, _, _, _, _) -> vars)
+let lookup     : string -> t ->    Core.var option = find (fun l -> l.vars)
                                                           (fun v -> v.name)
-let lookup_con : string -> t ->   Core.cvar option = find (fun (_, cvars, _, _, _) -> cvars)
+let lookup_con : string -> t ->   Core.cvar option = find (fun l -> l.cvars)
                                                           (fun cv -> cv.name)
-let lookup_fld : string -> t ->  Core.field option = find (fun (_, _, fields, _, _) -> fields)
+let lookup_fld : string -> t ->  Core.field option = find (fun l -> l.fields)
                                                           (fun field -> field.name)
-let lookup_ty  : string -> t -> Core.tydecl option = find (fun (_, _, _, cons, _) -> cons)
+let lookup_ty  : string -> t -> Core.tydecl option = find (fun l -> l.tydecls)
                                                           (fun Core.(CNominal con | CAlias (con, _, _)) -> con.name)
-let lookup_mod : string -> t ->     module_ option = find (fun (_, _, _, _, modules) -> modules)
+let lookup_mod : string -> t ->     module_ option = find (fun l -> l.modules)
                                                           (fun m -> m.name)
 
-let layer_extend     (vars, cvars, fields, cons, modules) v   = (v :: vars, cvars, fields, cons, modules)
-let layer_extend_con (vars, cvars, fields, cons, modules) cv  = (vars, cv :: cvars, fields, cons, modules)
-let layer_extend_fld (vars, cvars, fields, cons, modules) f   = (vars, cvars, f :: fields, cons, modules)
-let layer_extend_ty  (vars, cvars, fields, cons, modules) con = (vars, cvars, fields, con :: cons, modules)
-let layer_extend_mod (vars, cvars, fields, cons, modules) m   = (vars, cvars, fields, cons, m :: modules)
+let layer_extend     { vars; cvars; fields; tydecls; modules } v   = { vars = v :: vars; cvars; fields; tydecls; modules }
+let layer_extend_con { vars; cvars; fields; tydecls; modules } cv  = { vars; cvars = cv :: cvars; fields; tydecls; modules }
+let layer_extend_fld { vars; cvars; fields; tydecls; modules } f   = { vars; cvars; fields = f :: fields; tydecls; modules }
+let layer_extend_ty  { vars; cvars; fields; tydecls; modules } con = { vars; cvars; fields; tydecls = con :: tydecls; modules }
+let layer_extend_mod { vars; cvars; fields; tydecls; modules } m   = { vars; cvars; fields; tydecls; modules = m :: modules }
 let update : (layer -> 'a -> layer) -> t -> 'a -> t =
   fun f ctx x -> { top = f ctx.top x; parent = ctx.parent }
 let extend     = update layer_extend
