@@ -562,7 +562,10 @@ and expr2 = fun input k ->
         let operator_function l r = App (App (Var (s, sp), l), r) in
         match String.get s 0 with
         | ',' -> (1, AssocNone (fun es -> Tuple es))
-        | '|' -> (2, AssocRight operator_function)
+        | '|' -> if s = "||" then
+                   (2, AssocRight operator_function)
+                 else
+                   (4, AssocLeft operator_function)
         | '&' -> (3, AssocRight operator_function)
         | '=' | '<' | '>' | '!'
               -> (4, AssocLeft operator_function)
