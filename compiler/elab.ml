@@ -208,6 +208,7 @@ let initial_ctx
     and t_string = ty0 "string"
     and t_bool = ty0 "bool"
     in
+    add "|>"  qab (a --> ((a --> b) --> b));
     add "&&"  [] (t_bool --> (t_bool --> t_bool));
     add "||"  [] (t_bool --> (t_bool --> t_bool));
     add "not" [] (t_bool --> t_bool);

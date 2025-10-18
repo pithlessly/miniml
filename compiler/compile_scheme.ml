@@ -44,6 +44,7 @@ let go_var ({ name; id; provenance; _ } : var) =
     "v" ^ String.filter safe_in_scheme_identifiers name ^ "-" ^ string_of_int id
   | Builtin prefix ->
     match name with
+    | "|>" -> "miniml-ap"
     | "||" -> "miniml-or"
     | ";"  -> "miniml-semicolon"
     | "::" -> "miniml-cons"

@@ -9,6 +9,8 @@
 ; MiniML primitives
 ; =================
 
+(define miniml-ap   (lambda (x) (lambda (f) (f x))))
+
 (define miniml-&&   (lambda (a) (lambda (b) (and a b))))
 (define miniml-or   (lambda (a) (lambda (b) (or a b))))
 (define miniml-not  not)
