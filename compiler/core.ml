@@ -20,12 +20,14 @@ and  cvar = | CBinding of string    (* name in the syntax *)
                         * typ list  (* parameter types *)
                         * typ       (* return type *)
 (* field binding *)
-and  field = | Field of string    (* name in the syntax *)
-                      * var_id    (* numeric ID *)
-                      * int       (* position in the record *)
-                      * qvar list (* forall parameters *)
-                      * typ       (* record type *)
-                      * typ       (* field type *)
+and  field = {
+              name : string;
+              id : var_id;
+              position : int;
+              type_params : qvar list;
+              record_ty : typ;
+              field_ty : typ;
+             }
 and  typ  = | CQVar of qvar
             | CUVar of uvar ref
             | CTCon of con * typ list

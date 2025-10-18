@@ -21,7 +21,7 @@ let lookup     : string -> t ->    Core.var option = find (fun (vars, _, _, _, _
 let lookup_con : string -> t ->   Core.cvar option = find (fun (_, cvars, _, _, _) -> cvars)
                                                           (fun Core.(CBinding (name, _, _, _, _, _)) -> name)
 let lookup_fld : string -> t ->  Core.field option = find (fun (_, _, fields, _, _) -> fields)
-                                                          (fun Core.(Field (name, _, _, _, _, _)) -> name)
+                                                          (fun field -> field.name)
 let lookup_ty  : string -> t -> Core.tydecl option = find (fun (_, _, _, cons, _) -> cons)
                                                           (fun Core.(CNominal con | CAlias (con, _, _)) -> con.name)
 let lookup_mod : string -> t ->     module_ option = find (fun (_, _, _, _, modules) -> modules)

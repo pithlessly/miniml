@@ -417,8 +417,7 @@ let visit_record_fields
                        | Some field -> Ok field
                        | None -> Error (err_sp ("unknown record field: " ^ field_name) sp)
           in
-          let (Field (_, _, _, _, record_ty, _)) = field in
-          match ground record_ty with
+          match ground field.record_ty with
           | CTCon ({ name = record_name; info = CIRecord (fs_ref : field list ref); _ }, _) ->
             (match deref fs_ref with
              | [] -> invalid_arg "impossible: record cannot have empty list of fields"
@@ -427,16 +426,15 @@ let visit_record_fields
       in
       (* Get the current field out of the list of remaining fields. *)
       let* field =
-        match list_remove (fun (Field (n, _, _, _, _, _)) -> n = field_name) remaining_fields with
+        match list_remove (fun (f : field) -> f.name = field_name) remaining_fields with
         | None -> Error (E ("record " ^ record_name ^ " has no field " ^ field_name))
         | Some (field, remaining_fields) ->
           record_info_ref := Some (record_name, remaining_fields);
           Ok field
       in
-      let (Field (_, _, _, qvars, record_ty, field_ty)) = field in
-      let instantiate = instantiate qvars () in
-      let* () = unify ty (instantiate record_ty) in
-      let* rhs' = infer_rhs (instantiate field_ty) rhs in
+      let instantiate = instantiate field.type_params () in
+      let* () = unify ty (instantiate field.record_ty) in
+      let* rhs' = infer_rhs (instantiate field.field_ty) rhs in
       Ok (field, rhs')
     ) fields
   in
@@ -598,7 +596,7 @@ let new_elaborator () : elaborator =
             Ok (Ctx.extend_ty ctx (CNominal con))
           in
           (* stage 3 *)
-          let record_type = CTCon (con, List.map (fun qv -> CQVar qv) ty_params) in
+          let record_ty = CTCon (con, List.map (fun qv -> CQVar qv) ty_params) in
           let add_terms ctx =
             let* ctx = prev_add_terms ctx in
             let* (_, fields') =
@@ -607,12 +605,15 @@ let new_elaborator () : elaborator =
                       (* unlike with constructors, we are OK with shadowing of
                          record fields *)
                       let* field_ty = translate_ast_typ ctx tvs ty in
-                      Ok (idx + 1, Field (name,
-                                          next_var_id (),
-                                          idx,
-                                          ty_params,
-                                          record_type,
-                                          field_ty))
+                      let field : field = {
+                        name;
+                        id = next_var_id ();
+                        position = idx;
+                        type_params = ty_params;
+                        record_ty;
+                        field_ty;
+                      }
+                      in Ok (idx + 1, field)
                     ) fields 0
             in
             (* update things *)
@@ -794,11 +795,9 @@ let new_elaborator () : elaborator =
           | (true, [])
           | (false, _) -> Ok ()
           | (true, _) ->
-              Error (E ("pattern of record type " ^ record_name ^
-                        " is missing fields: " ^
+              Error (E ("pattern of record type " ^ record_name ^ " is missing fields: " ^
                           String.concat ", "
-                            (List.map (fun (Field (n, _, _, _, _, _)) -> n)
-                                      remaining_fields)))
+                            (List.map (fun (f : field) -> f.name) remaining_fields)))
         in
         Ok (PRecord (exhaustive, fields'))
       | PWild        -> Ok PWild
@@ -881,17 +880,14 @@ let new_elaborator () : elaborator =
       in
       let* field =
         match
-          List.find_opt (fun field_decl ->
-            let (Field (name, _, _, _, _, _)) = field_decl in
-            name = field_name) (deref fields)
+          List.find_opt (fun (fld : field) -> fld.name = field_name) (deref fields)
         with
         | None -> Error (E ("record " ^ con_name ^ " has no field " ^ field_name))
         | Some field -> Ok field
       in
-      let (Field (_, _, _, qvars, record_ty, result_ty)) = field in
-      let instantiate = instantiate lvl qvars () in
-      let* () = unify e_ty (instantiate record_ty) in
-      let* () = unify ty (instantiate result_ty) in
+      let instantiate = instantiate lvl field.type_params () in
+      let* () = unify e_ty (instantiate field.record_ty) in
+      let* () = unify ty (instantiate field.field_ty) in
       Ok (Project (e', field))
     | MkRecord [] -> Error (E "empty records are not allowed")
     | MkRecord fields ->
@@ -907,7 +903,7 @@ let new_elaborator () : elaborator =
         | Some (record_name, remaining_fields) ->
           Error (E ("initializer for record " ^ record_name ^ " is missing fields: " ^
                       String.concat ", "
-                        (List.map (fun (Field (n, _, _, _, _, _)) -> n) remaining_fields)))
+                        (List.map (fun (f : field) -> f.name) remaining_fields)))
       in
       Ok (MkRecord fields')
     | App (e1, e2) ->

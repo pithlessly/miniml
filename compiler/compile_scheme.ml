@@ -131,9 +131,8 @@ let scheme (_ : Elab.elaborator) (decls : core) =
     | PAsc (_, vd) -> Void.absurd vd
     | PRecord (_, fields) ->
       "(and " ^ String.concat " "
-        (List.map (fun (fld, p) ->
-          let (Field (_, _, field_idx, _, _, _)) = fld in
-          "(let ((scrutinee (vector-ref scrutinee " ^ string_of_int field_idx ^ "))) "
+        (List.map (fun ((fld : field), p) ->
+          "(let ((scrutinee (vector-ref scrutinee " ^ string_of_int fld.position ^ "))) "
           ^ go_pat p ^ ")") fields) ^ ")"
     | PWild -> "#t"
   in
@@ -176,17 +175,13 @@ let scheme (_ : Elab.elaborator) (decls : core) =
     | OpenIn (_, _) ->
       invalid_arg "OpenIn should no longer be present in Core.expr"
     | Project (e, field) ->
-      let (Field (_, _, field_idx, _, _, _)) = field in
       let (p, e') = go_expr e in
-      (p, "(vector-ref " ^ e' ^ " " ^ string_of_int field_idx ^ ")")
+      (p, "(vector-ref " ^ e' ^ " " ^ string_of_int field.position ^ ")")
     | MkRecord fields ->
       (* perform side effects in declaration order *)
       let fields = List.map (fun (fld, rhs) -> (fld, go_expr_pure rhs)) fields in
       (* but then, sort the fields by their index *)
-      let fields = list_sort (fun (fld1, _) (fld2, _) ->
-                                let (Field (_, _, pos1, _, _, _)) = fld1
-                                and (Field (_, _, pos2, _, _, _)) = fld2
-                                in pos1 - pos2)
+      let fields = list_sort (fun ({ position = p1; _ }, _) ({ position = p2; _ }, _) -> p1 - p2)
                              fields
       in
       (* and now we can forget about field order *)
