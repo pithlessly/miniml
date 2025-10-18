@@ -429,7 +429,7 @@ let visit_record_fields
       (* Get the current field out of the list of remaining fields. *)
       let* field =
         match list_remove (fun (f : field) -> f.name = field_name) remaining_fields with
-        | None -> Error (E ("record " ^ record_name ^ " has no field " ^ field_name))
+        | None -> Error (err_sp ("record " ^ record_name ^ " has no field " ^ field_name) sp)
         | Some (field, remaining_fields) ->
           record_info_ref := Some (record_name, remaining_fields);
           Ok field
