@@ -1,6 +1,8 @@
 type error = | E of string
 type 'a m_result = ('a, error) result
 
+let (||>) (x, y) f = f x y
+
 (* monadic operations *)
 
 let map_m
