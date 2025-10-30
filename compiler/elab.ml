@@ -407,7 +407,7 @@ let visit_record_fields
              -> Some (record_name, deref fs_ref)
          | _ -> None)
   in
-  let* fields' = map_m error_monad
+  let* fields' = fields |> map_m error_monad
     (fun ((field_name, sp), rhs) ->
       (* Check whether `record_info_ref` is populated. *)
       let* (record_name, remaining_fields) =
@@ -438,7 +438,7 @@ let visit_record_fields
       let* () = unify ty (instantiate field.record_ty) in
       let* rhs' = infer_rhs (instantiate field.field_ty) rhs in
       Ok (field, rhs')
-    ) fields
+    )
   in
   Ok (deref record_info_ref, fields')
 
@@ -468,13 +468,13 @@ let new_elaborator () : elaborator =
     in CUVar (ref (Unknown (name, id, lvl)))
   in
   let new_uvars lvl name xs () =
-    List.mapi (fun i x ->
+    xs |> List.mapi (fun i x ->
       let name = match name with
                  | Some nm -> Some (nm ^ "[" ^ string_of_int i ^ "]")
                  | None    -> None
       in
       (x, new_uvar lvl name ())
-    ) xs
+    )
   in
   let anon_var ty () : var =
     { name = "<anonymous>"; id = next_var_id ();
@@ -535,17 +535,19 @@ let new_elaborator () : elaborator =
     let* ((add_adts    : Ctx.t -> Ctx.t m_result),
           (add_aliases : Ctx.t -> Ctx.t m_result),
           (add_terms   : Ctx.t -> Ctx.t m_result))
-    = fold_left_m error_monad (fun (prev_add_adts, prev_add_aliases, prev_add_terms)
+    = decls |>
+      fold_left_m error_monad (fun (prev_add_adts, prev_add_aliases, prev_add_terms)
                                    (type_params, name, decl) ->
         let arity = List.length type_params in
         let type_params_qvs = List.map (fun s -> (s, new_qvar s ())) type_params in
         let* (type_params_map : typ StringMap.t) =
-          fold_left_m error_monad (fun acc (s, qv) ->
+          (StringMap.empty, type_params_qvs)
+          ||> fold_left_m error_monad (fun acc (s, qv) ->
             match StringMap.insert s (CQVar qv) acc with
             | Some map -> Ok map
             | None -> Error (E ("type declaration " ^ name ^
                                 " has duplicate type parameter '" ^ s))
-          ) StringMap.empty type_params_qvs
+          )
         in
         let tvs = tvs_from_map type_params_map in
         let type_params = List.map snd type_params_qvs in
@@ -570,13 +572,13 @@ let new_elaborator () : elaborator =
           let adt_ty = CTCon (con, List.map (fun qv -> CQVar qv) type_params) in
           let add_terms ctx =
             let* ctx = prev_add_terms ctx in
-            fold_left_m error_monad (fun ctx (name, param_tys) ->
+            (ctx, constructors)
+            ||> fold_left_m error_monad (fun ctx (name, param_tys) ->
               let* () = match Ctx.lookup_con name ctx with
                         | Some _ -> (* we don't yet know how to disambiguate *)
                                     Error (E ("duplicate constructor name: " ^ name))
                         | None   -> Ok () in
-              let* param_tys' = map_m error_monad (translate_ast_typ ctx tvs)
-                                                  param_tys
+              let* param_tys' = map_m error_monad (translate_ast_typ ctx tvs) param_tys
               in Ok (Ctx.extend_con ctx {
                 name;
                 id = next_var_id ();
@@ -585,7 +587,7 @@ let new_elaborator () : elaborator =
                 param_tys = param_tys';
                 adt_ty;
               })
-            ) ctx constructors
+            )
           in Ok (add_adts, prev_add_aliases, add_terms)
         | Ast.(Record []) ->
           Error (E "empty records are not allowed")
@@ -604,21 +606,20 @@ let new_elaborator () : elaborator =
           let add_terms ctx =
             let* ctx = prev_add_terms ctx in
             let* (_, fields') =
-              map_m error_state_monad
-                    (fun (name, sp, ty) idx ->
-                      (* unlike with constructors, we are OK with shadowing of
-                         record fields *)
-                      let* field_ty = translate_ast_typ ctx tvs ty in
-                      let field : field = {
-                        name;
-                        id = next_var_id ();
-                        position = idx;
-                        type_params;
-                        record_ty;
-                        field_ty;
-                      }
-                      in Ok (idx + 1, field)
-                    ) fields 0
+              (fields, 0) ||> map_m error_state_monad (fun (name, sp, ty) idx ->
+                (* unlike with constructors, we are OK with shadowing of
+                   record fields *)
+                let* field_ty = translate_ast_typ ctx tvs ty in
+                let field : field = {
+                  name;
+                  id = next_var_id ();
+                  position = idx;
+                  type_params;
+                  record_ty;
+                  field_ty;
+                }
+                in Ok (idx + 1, field)
+              )
             in
             (* update things *)
             fields_ref := fields';
@@ -635,7 +636,7 @@ let new_elaborator () : elaborator =
                       type_params,
                       ty')))
           in Ok (prev_add_adts, add_aliases, prev_add_terms)
-      ) ((fun c -> Ok c), (fun c -> Ok c), (fun c -> Ok c)) decls
+      ) ((fun c -> Ok c), (fun c -> Ok c), (fun c -> Ok c))
     in
     add_adts ctx >>= add_aliases >>= add_terms
   in
@@ -708,7 +709,7 @@ let new_elaborator () : elaborator =
       | PRecord (_, fs)
                      -> go_list (List.map snd fs)
     and go_list pats =
-      List.fold_left merge (Ok StringMap.empty) (List.map go pats)
+      List.map go pats |> List.fold_left merge (Ok StringMap.empty)
     and merge ev1 ev2 =
       let* v1 = ev1 in
       let* v2 = ev2 in
@@ -921,12 +922,11 @@ let new_elaborator () : elaborator =
       let tvs = tvs_new_dynamic (fun s -> new_uvar lvl s ()) () in
       let* (e_scrut', ty_scrut) = infer lvl ctx e_scrut in
       let* cases' =
-        map_m error_monad
-            (fun (pat, e) ->
-              let* (ctx', pat') = infer_pat_at lvl tvs ctx  ty_scrut pat in
-              let* e'           = infer_at     lvl     ctx' ty       e   in
-              Ok (pat', e'))
-            cases
+        cases |> map_m error_monad (fun (pat, e) ->
+          let* (ctx', pat') = infer_pat_at lvl tvs ctx  ty_scrut pat in
+          let* e'           = infer_at     lvl     ctx' ty       e   in
+          Ok (pat', e')
+        )
       in
       Ok (Match (e_scrut', cases'))
     | IfThenElse (e1, e2, e3) ->
@@ -1034,22 +1034,25 @@ let new_elaborator () : elaborator =
     let can_generalize =
       List.fold_left (fun acc (_, cg, _) -> acc && cg) true bindings in
     let bound_vars : var list =
-      if not can_generalize then
-        (Miniml.debug (fun () ->
-          "defined: " ^
-            (String.concat "," (
-              List.map (fun ({ name; ty; _ } : var) ->
-                name ^ ":" ^ show_ty ty) bound_vars)));
-         bound_vars)
-      else
+      if not can_generalize then (
+        Miniml.debug (fun () ->
+          "defined: " ^ (
+            bound_vars
+            |> List.map (fun { name; ty; _ } -> name ^ ":" ^ show_ty ty)
+            |> String.concat ","
+          ));
+        bound_vars
+      ) else
         let types = List.map (fun (v : var) -> v.ty) bound_vars in
         let (qvars, types) = generalize lvl types in
         Miniml.debug (fun () ->
-          "defined(gen): " ^
-            (String.concat "," (
-              List.map (fun ({ name; ty; _ } : var) ->
-                name ^ ":" ^ show_ty ty) bound_vars)));
-        List.map2 (fun (var : var) ty ->
+          "defined(gen): " ^ (
+            bound_vars
+            |> List.map (fun { name; ty; _ } -> name ^ ":" ^ show_ty ty)
+            |> String.concat ","
+          ));
+        (bound_vars, types)
+        ||> List.map2 (fun (var : var) ty ->
           (* NOTE: What's going on here? We are allocating a "new" variable,
           but giving it the same ID as the above. This is fine, because (since
           generalization mutates the types it encounters, replacing the uvars
@@ -1065,7 +1068,7 @@ let new_elaborator () : elaborator =
           (* TODO: maybe trim the qvars to those which appear in the ty? *)
           { name = var.name; id = var.id; provenance = var.provenance;
             type_params = qvars; ty }
-        ) bound_vars types
+        )
     in
     let bindings = List.map (fun (_, _, binding) -> binding) bindings in
     Ok (

@@ -215,13 +215,13 @@ let scheme (_ : Elab.elaborator) (decls : core) =
       indent 2 (fun () ->
         emit_ln "(cond";
         let last_is_t = ref false in
-        List.iter (fun (pat, e) ->
+        branches |> List.iter (fun (pat, e) ->
           let pat' = go_pat pat in
           last_is_t := (pat' = "#t");
           emit_ln (" (" ^ go_pat pat);
           emit_ln ("  (let ()");
           indent 4 (fun () -> emit_ln (go_expr_impure e ^ "))"))
-        ) branches;
+        );
         emit_ln (if deref last_is_t then " )))"
                                     else " (else (miniml-match-failure)))))"));
       (true, tv)
@@ -265,14 +265,14 @@ let scheme (_ : Elab.elaborator) (decls : core) =
     emit_ln (String.concat " " (List.map (fun v -> "(define " ^ go_var v ^ " '())") locals));
     emit_ln "(miniml-let-guard (and";
     indent 2 (fun () ->
-      List.iter (fun (head, args, _, rhs) ->
+      bs |> List.iter (fun (head, args, _, rhs) ->
         let rhs = Fun (args, rhs) in
         emit_ln "(let ((scrutinee (let ()";
         indent 2 (fun () ->
           indent 6 (fun () -> emit_ln (go_expr_impure rhs ^ ")))"));
           emit_ln (go_pat head ^ ")")
         )
-      ) bs
+      )
     );
     emit_ln " ))"
   in

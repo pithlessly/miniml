@@ -43,11 +43,11 @@ let extend_ty  = update layer_extend_ty
 let extend_mod = update layer_extend_mod
 let extend_open_over : t -> string -> t option =
   fun ctx mod_name ->
-    Option.map (fun (m : module_) -> { top = m.layer; parent = Some ctx })
-      (lookup_mod mod_name ctx)
+    lookup_mod mod_name ctx
+    |> Option.map (fun m -> { top = m.layer; parent = Some ctx })
 let extend_open_under : t -> string -> t option =
   fun ctx mod_name ->
-    Option.map (fun (m : module_) -> { top = ctx.top; parent = Some { top = m.layer; parent = ctx.parent } })
-      (lookup_mod mod_name ctx)
+    lookup_mod mod_name ctx
+    |> Option.map (fun m -> { top = ctx.top; parent = Some { top = m.layer; parent = ctx.parent } })
 let extend_new_layer : t -> t =
   fun ctx -> { top = empty_layer; parent = Some ctx }
