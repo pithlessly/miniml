@@ -59,8 +59,8 @@ let go_cvar ({ provenance; name; id; _ } : cvar) =
   | _ -> invalid_arg "builtin constructors are handled specially"
 
 let scheme (_ : Elab.elaborator) (decls : core) =
-  let result = ref [] in
-  let emit s = result := (s :: deref result) in
+  let result = ref Nil in
+  let emit s = result := Snoc (deref result, s) in
   let tmp_var =
     let next_id = counter () in
     fun () -> ("t" ^ string_of_int (next_id ()))
@@ -277,6 +277,6 @@ let scheme (_ : Elab.elaborator) (decls : core) =
     emit_ln " ))"
   in
   List.iter bindings decls;
-  String.concat "" (List.rev (deref result))
+  String.concat "" (Snoc.to_list (deref result))
 
 let () = Compile.add_backend "scheme" scheme

@@ -31,7 +31,7 @@ let lex str =
     else None
   in
   let rec go i tokens =
-    let adv t = go (i + 1) (t :: tokens) in
+    let adv t = go (i + 1) (Snoc (tokens, t)) in
     let take_range d (included : char -> bool) (mk_tok : span -> string -> token) =
       let rec scan d = match char (i + d) with
                        | Some c -> if included c then scan (d + 1) else d
@@ -39,7 +39,7 @@ let lex str =
       in
       let d = scan d in
       let span = { line_no = deref latest_line } in
-      go (i + d) (mk_tok span (String.sub str i d) :: tokens)
+      go (i + d) (Snoc (tokens, mk_tok span (String.sub str i d)))
     in
     match char i with
     | Some '\n'
@@ -49,23 +49,23 @@ let lex str =
       let rec scan i parts escaped =
         match (char i, escaped) with
         | (None, _) -> Error (E "expected trailing quote for string literal, got EOF")
-        | (Some '"',  false) -> Ok (i + 1, TkStrLit (String.concat "" (List.rev parts)))
+        | (Some '"',  false) -> Ok (i + 1, TkStrLit (String.concat "" (Snoc.to_list parts)))
         | (Some '\\', false) -> scan (i + 1) parts true
-        | (Some c,    false) -> scan (i + 1) (String.make 1 c :: parts) false
-        | (Some '"',  true)  -> scan (i + 1) ("\"" :: parts) false
-        | (Some '\\', true)  -> scan (i + 1) ("\\" :: parts) false
-        | (Some 'n',  true)  -> scan (i + 1) ("\n" :: parts) false
-        | (Some 'r',  true)  -> scan (i + 1) ("\r" :: parts) false
+        | (Some c,    false) -> scan (i + 1) (Snoc (parts, String.make 1 c)) false
+        | (Some '"',  true)  -> scan (i + 1) (Snoc (parts, "\"")) false
+        | (Some '\\', true)  -> scan (i + 1) (Snoc (parts, "\\")) false
+        | (Some 'n',  true)  -> scan (i + 1) (Snoc (parts, "\n")) false
+        | (Some 'r',  true)  -> scan (i + 1) (Snoc (parts, "\r")) false
         | (Some _,    true)  -> Error (E "invalid escape sequence in string literal")
       in
-      (match scan (i + 1) [] false with
+      (match scan (i + 1) Nil false with
        | Error e -> Error e
-       | Ok (i, tok) -> go i (tok :: tokens))
+       | Ok (i, tok) -> go i (Snoc (tokens, tok)))
     | Some '\'' ->
       let char_done c i =
         match char i with
         | None -> Error (E "expected trailing quote for character literal, got EOF")
-        | Some '\'' -> go (i + 1) (TkCharLit c :: tokens)
+        | Some '\'' -> go (i + 1) (Snoc (tokens, TkCharLit c))
         | Some _ -> if lower c then take_range 1 ident (fun sp s -> IdentQuote (s, sp))
                     else Error (E "unterminated character literal")
       in
@@ -128,6 +128,6 @@ let lex str =
       if symbolic c then take_range 0 symbolic mk_symbolic_ident else
         Error (E ("unexpected character: " ^ String.make 1 c
                   ^ " at position: " ^ string_of_int i))
-    | None -> Ok (List.rev tokens)
+    | None -> Ok (Snoc.to_list tokens)
   in
-  go 0 []
+  go 0 Nil

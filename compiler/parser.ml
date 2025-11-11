@@ -33,7 +33,7 @@ let resolve_precedence (operands: 'a list) (operators: 'o list)
           (* removes n+1 elements of `xs` and n elements of `opers` *)
           let rec walk_nary acc xs opers =
             let (x, xs, opers) = go (o_prec + 1) xs opers in
-            let acc = x :: acc in
+            let acc = Snoc (acc, x) in
             match opers with
             | o' :: opers ->
               let same_operator =
@@ -54,8 +54,8 @@ let resolve_precedence (operands: 'a list) (operators: 'o list)
                                else (acc, xs, o' :: opers)
             | [] -> (acc, xs, [])
           in
-          let (args, xs, opers) = walk_nary [x] xs opers in
-          go prec (f (List.rev args) :: xs) opers
+          let (args, xs, opers) = walk_nary (Snoc (Nil, x)) xs opers in
+          go prec (f (Snoc.to_list args) :: xs) opers
       )
     | _ -> invalid_arg "input lists weren't the appropriate lengths"
   in
@@ -91,9 +91,9 @@ let many (p: 'a option parser): 'a list parser =
   fun input k ->
     let rec go input acc = p input (fun input opt ->
                                     match opt with
-                                    | Some x -> go input (x :: acc)
-                                    | None -> k input (List.rev acc))
-    in go input []
+                                    | Some x -> go input (Snoc (acc, x))
+                                    | None -> k input (Snoc.to_list acc))
+    in go input Nil
 (* append an artificial token to the input *)
 let dummy tok input = tok :: input
 
@@ -145,10 +145,10 @@ let ty_params: string list parser =
   | IdentQuote (v, _) :: input -> k input [v] (* single variable *)
   | OpenParen :: IdentQuote (v1, sp) :: input ->
     let rec go input vs = match input with
-                          | Comma :: IdentQuote (v, _) :: input -> go input (v :: vs)
-                          | CloseParen :: input -> k input (List.rev vs)
+                          | Comma :: IdentQuote (v, _) :: input -> go input (Snoc (vs, v))
+                          | CloseParen :: input -> k input (Snoc.to_list vs)
                           | _ -> Error (E "couldn't finish parsing type parameter list")
-    in go input [v1]
+    in go input (Snoc (Nil, v1))
   | OpenParen :: _ -> Error (E "expected type parameters")
   | _ -> k input []
 let ty_name: string parser =
@@ -170,25 +170,25 @@ let rec ty_atomic: typ parser =
     | OpenParen :: input ->
       let rec go input ts =
         match input with
-        | Comma :: input -> ty input (fun input t -> go input (t :: ts))
-        | CloseParen :: input -> k input (List.rev ts)
+        | Comma :: input -> ty input (fun input t -> go input (Snoc (ts, t)))
+        | CloseParen :: input -> k input (Snoc.to_list ts)
         | _ -> Error (E "couldn't finish parsing type argument list")
       (* artificially prepend "," to the input stream
          to simplify the parsing here *)
-      in go (dummy Comma input) []
+      in go (dummy Comma input) Nil
     | KUnder :: input -> k input [THole]
     | _ -> Error (E "couldn't start parsing a type")
   in
   fun input k ->
   (* parse out all suffixed type constructors *)
   let rec go input params =
-    let rec tycon (modules : mod_expr list) : (mod_expr list * string * span) option parser = fun input k ->
+    let rec tycon (modules : mod_expr snoc) : (mod_expr list * string * span) option parser = fun input k ->
       match input with
-      | IdentUpper (name, _) :: Dot :: input -> tycon (MModule name :: modules) input k
-      | IdentLower (v, sp)          :: input -> k input (Some (List.rev modules, v, sp))
+      | IdentUpper (name, _) :: Dot :: input -> tycon (Snoc (modules, MModule name)) input k
+      | IdentLower (v, sp)          :: input -> k input (Some (Snoc.to_list modules, v, sp))
       | _                                    -> k input None
     in
-    tycon [] input (fun input tycon_info_opt ->
+    tycon Nil input (fun input tycon_info_opt ->
     match tycon_info_opt with
     | Some (modules, v, sp) -> let params' = [TCon (modules, v, sp, params)] in
                                go input params'
@@ -203,31 +203,31 @@ and ty: typ parser =
      in parsing patterns, expressions, etc. *)
   let rec go input ty_operands ty_operators =
     ty_atomic input (fun input operand ->
-    let ty_operands = operand :: ty_operands in
+    let ty_operands = Snoc (ty_operands, operand) in
     match input with
     | Arrow :: input ->
-      go input ty_operands ("->" :: ty_operators)
+      go input ty_operands (Snoc (ty_operators, "->"))
     | IdentSymbol ("*", _) :: input ->
-      go input ty_operands ("*" :: ty_operators)
+      go input ty_operands (Snoc (ty_operators, "*"))
     | IdentSymbol (op, sp) :: _ ->
       Error (err_sp ("invalid type operator: " ^ op) sp)
     | _ ->
       let ty_expr: typ =
         resolve_precedence
-          (List.rev ty_operands)
-          (List.rev ty_operators)
+          (Snoc.to_list ty_operands)
+          (Snoc.to_list ty_operators)
           (function
            | "->" -> (0, AssocRight (fun l r -> TCon ([], "->", dummy_span, [l; r])))
            | "*"  -> (1, AssocNone (fun ts -> TCon ([], "*", dummy_span, ts)))
            | _    -> invalid_arg "should be impossible")
       in k input ty_expr)
-  in go input [] []
+  in go input Nil Nil
 
 let record_decl_after_open_brace : record_decl parser =
   fun input k ->
   let rec fields input field_names fs =
     match input with
-    | CloseBrace :: input -> k input (List.rev fs)
+    | CloseBrace :: input -> k input (Snoc.to_list fs)
     | IdentLower (s, sp) :: input ->
         colon input (fun input () ->
         ty input (fun input t ->
@@ -236,17 +236,17 @@ let record_decl_after_open_brace : record_decl parser =
           | Some field_names -> Ok field_names
           | None -> Error (err_sp ("duplicate field name: " ^ s) sp)
         in
-        let fs = (s, sp, t) :: fs in
+        let fs = Snoc (fs, (s, sp, t)) in
         (* support both { a : int; } and { a : int } *)
         match input with
         | Semicolon :: CloseBrace :: input
         | CloseBrace :: input ->
-          k input (List.rev fs)
+          k input (Snoc.to_list fs)
         | Semicolon :: input ->
           fields input field_names fs
         | _ -> Error (E "expected ';' or '}' after record field")))
     | _ -> Error (E "expected more record fields or end of record")
-  in fields input StringMap.empty []
+  in fields input StringMap.empty Nil
 
 let ty_decl: (string list * string * typ_decl) option parser =
   fun input k ->
@@ -266,17 +266,17 @@ let ty_decl: (string list * string * typ_decl) option parser =
                     let rec go input ts =
                       match input with
                       | IdentSymbol ("*", _) :: input ->
-                        ty_atomic input (fun input t -> go input (t :: ts))
+                        ty_atomic input (fun input t -> go input (Snoc (ts, t)))
                       | _ ->
-                        adt_constructors input ((c, List.rev ts) :: cs)
+                        adt_constructors input (Snoc (cs, (c, Snoc.to_list ts)))
                     (* artificially prepend "*" to the input stream
                        to simplify the parsing here *)
-                    in go (IdentSymbol ("*", dummy_span) :: input) []
+                    in go (IdentSymbol ("*", dummy_span) :: input) Nil
                   (* TODO: use sp here *)
                   | Pipe :: IdentUpper (c, sp) :: input ->
-                    adt_constructors input ((c, []) :: cs)
-                  | _ -> k input (Datatype (List.rev cs))
-                in adt_constructors input []
+                    adt_constructors input (Snoc (cs, (c, [])))
+                  | _ -> k input (Datatype (Snoc.to_list cs))
+                in adt_constructors input Nil
               | OpenBrace :: input ->
                 record_decl_after_open_brace input
                   (fun input record -> k input (Record record))
@@ -307,14 +307,14 @@ let list_after_open_bracket
   (parse_elem : 'a parser)
 : 'a list parser
 = fun input k ->
-  let rec start () = continue input []
-  and finish input es = k input (List.rev es)
+  let rec start () = continue input Nil
+  and finish input es = k input (Snoc.to_list es)
   and continue input es =
     match input with
     | CloseBracket :: input -> finish input es
     | input ->
       parse_elem input (fun input expr ->
-      let es = expr :: es in
+      let es = Snoc (es, expr) in
       match input with
       | CloseBracket :: input -> finish input es
       | Semicolon :: input -> continue input es
@@ -339,8 +339,8 @@ let rec pattern3 : pat option parser = fun input k ->
   | KUnder       :: input -> k input (Some PWild)
   | OpenBracket  :: input -> list_after_open_bracket pattern0 input (fun input ps ->
                              k input (Some (PList ps)))
-  | OpenBrace    :: input -> let rec start () = continue input StringMap.empty []
-                             and finish input exhaustive fs = k input (Some (PRecord (exhaustive, List.rev fs)))
+  | OpenBrace    :: input -> let rec start () = continue input StringMap.empty Nil
+                             and finish input exhaustive fs = k input (Some (PRecord (exhaustive, Snoc.to_list fs)))
                              and continue input field_names fs =
                                match input with
                                | CloseBrace :: input -> finish input true fs
@@ -361,7 +361,7 @@ let rec pattern3 : pat option parser = fun input k ->
                                  | Some field_names -> Ok field_names
                                  | None -> Error (err_sp ("duplicate field name in record expression: " ^ s) sp)
                                in
-                               let fs = (field, rhs) :: fs in
+                               let fs = Snoc (fs, (field, rhs)) in
                                match input with
                                | CloseBrace :: input -> finish input true fs
                                | Semicolon :: input -> continue input field_names fs
@@ -645,8 +645,8 @@ and expr5 = fun input k ->
     list_after_open_bracket force_expr1 input (fun input es ->
     k input (Some (List es)))
   | OpenBrace    :: input ->
-    let rec start () = continue input StringMap.empty []
-    and finish input fs = k input (Some (MkRecord (List.rev fs)))
+    let rec start () = continue input StringMap.empty Nil
+    and finish input fs = k input (Some (MkRecord (Snoc.to_list fs)))
     and continue input field_names fs =
       match input with
       | CloseBrace :: input -> finish input fs
@@ -664,7 +664,7 @@ and expr5 = fun input k ->
         | Some field_names -> Ok field_names
         | None -> Error (err_sp ("duplicate field name in record expression: " ^ s) sp)
       in
-      let fs = (field, rhs) :: fs in
+      let fs = Snoc (fs, (field, rhs)) in
       match input with
       | CloseBrace :: input -> finish input fs
       | Semicolon :: input -> continue input field_names fs

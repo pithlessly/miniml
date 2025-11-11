@@ -3,6 +3,45 @@ type 'a m_result = ('a, error) result
 
 let (||>) (x, y) f = f x y
 
+type 'a snoc = | Nil | Snoc of 'a snoc * 'a
+
+module Snoc = struct
+  let map f =
+    let rec go = function
+      | Nil -> Nil
+      | Snoc (xs, x) -> Snoc (go xs, f x)
+    in go
+
+  (* tail-recursive *)
+  let fold_right : ('a -> 'acc -> 'acc) -> 'a snoc -> 'acc -> 'acc =
+    fun f ->
+      let rec go xs acc =
+        match xs with
+        | Nil -> acc
+        | Snoc (xs, x) -> go xs (f x acc)
+      in go
+
+  (* matches the structure of the list more closely *)
+  let fold_left : ('acc -> 'a -> 'acc) -> 'acc -> 'a snoc -> 'acc =
+    fun f init ->
+      let rec go = function
+        | Nil -> init
+        | Snoc (xs, x) -> f (go xs) x
+      in go
+
+  let sum : int snoc -> int =
+    fold_left (fun x y -> x + y) 0
+
+  let to_rev_list (xs : 'a snoc) : 'a list =
+    fold_left (fun acc x -> x :: acc) [] xs
+
+  let to_list_append (xs : 'a snoc) (ys : 'a list) : 'a list =
+    fold_right (fun x ys -> x :: ys) xs ys
+
+  let to_list (xs : 'a snoc) : 'a list =
+    to_list_append xs []
+end
+
 (* monadic operations *)
 
 let map_m
@@ -12,9 +51,9 @@ let map_m
   : 'a list -> 'b_list_m =
   let rec go ys xs =
     match xs with
-    | [] -> pure (List.rev ys)
-    | x :: xs -> f x >>= fun y -> go (y :: ys) xs
-  in go []
+    | [] -> pure (Snoc.to_list ys)
+    | x :: xs -> f x >>= fun y -> go (Snoc (ys, y)) xs
+  in go Nil
 let fold_left_m
   ((pure  : 'b -> 'b_m),
    ((>>=) : 'b_m -> ('b -> 'b_m) -> 'b_m))
@@ -67,10 +106,10 @@ let list_remove : ('a -> bool) -> 'a list -> ('a * 'a list) option =
       | [] -> None
       | h :: xs ->
         if p h then
-          Some (h, List.rev acc @ xs)
+          Some (h, Snoc.to_list_append acc xs)
         else
-          go (h :: acc) xs
-    in go []
+          go (Snoc (acc, h)) xs
+    in go Nil
 
 let list_split_at : int -> 'a list -> 'a list * 'a list =
   fun n xs ->
@@ -78,10 +117,10 @@ let list_split_at : int -> 'a list -> 'a list * 'a list =
       if n > 0 then
         match xs with
         | [] -> invalid_arg "list is too long to split"
-        | x :: xs -> go (n - 1) (x :: acc) xs
+        | x :: xs -> go (n - 1) (Snoc (acc, x)) xs
       else
-        (List.rev acc, xs)
-    in go n [] xs
+        (Snoc.to_list acc, xs)
+    in go n Nil xs
 
 let list_merge (cmp : 'a -> 'a -> int) : 'a list -> 'a list -> 'a list =
   let rec go xs ys =
