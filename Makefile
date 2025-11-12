@@ -23,6 +23,7 @@ COMPILER_SOURCES := \
 	compiler/core.ml           \
 	compiler/lex.ml            \
 	compiler/parser.ml         \
+	compiler/tvs.ml            \
 	compiler/ctx.ml            \
 	compiler/elab.ml           \
 	compiler/elab2.ml          \
