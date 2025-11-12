@@ -29,7 +29,7 @@ let module_name_from_filename : string -> string option =
     match basename_and_extension str with
     | (name, (".ml" | ".mini-ml")) ->
         let first_letter = String.get name 0 in
-        if Lex.lower_letter first_letter && String.for_all Lex.lower name
+        if Lex.lower_letter first_letter && String.for_all Lex.ident name
         then Some (
           String.make 1 (char_of_int (int_of_char first_letter - 32))
           ^ String.sub name 1 (String.length name - 1)
