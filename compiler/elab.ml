@@ -1035,7 +1035,7 @@ let new_elaborator () : elaborator =
       List.fold_left (fun acc (_, cg, _) -> acc && cg) true bindings in
     let bound_vars : var list =
       if not can_generalize then (
-        Miniml.debug (fun () ->
+        Miniml.trace (fun () ->
           "defined: " ^ (
             bound_vars
             |> List.map (fun { name; ty; _ } -> name ^ ":" ^ show_ty ty)
@@ -1045,7 +1045,7 @@ let new_elaborator () : elaborator =
       ) else
         let types = List.map (fun (v : var) -> v.ty) bound_vars in
         let (qvars, types) = generalize lvl types in
-        Miniml.debug (fun () ->
+        Miniml.trace (fun () ->
           "defined(gen): " ^ (
             bound_vars
             |> List.map (fun { name; ty; _ } -> name ^ ":" ^ show_ty ty)
