@@ -12,6 +12,8 @@ let go_char c =
     "#\\newline"
   else if c = '\r' then
     "(integer->char 13)"
+  else if code > 128 then
+    "(integer->char " ^ string_of_int code ^ ")"
   else
     invalid_arg ("we don't yet support this character code: " ^ string_of_int code)
 and go_int = string_of_int
@@ -24,7 +26,7 @@ and go_str s =
             | '\n' -> "\\n"
             | '\r' -> "\\r"
             | c    -> let code = int_of_char c in
-                      if 32 <= code && code < 128 then
+                      if 32 <= code then
                         String.make 1 c
                       else
                         invalid_arg ("we don't yet support this character code: "
