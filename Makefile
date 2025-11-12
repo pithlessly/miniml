@@ -25,6 +25,7 @@ COMPILER_SOURCES := \
 	compiler/parser.ml         \
 	compiler/ctx.ml            \
 	compiler/elab.ml           \
+	compiler/elab2.ml          \
 	compiler/compile.ml        \
 	compiler/compile_scheme.ml \
 	compiler/main.ml
