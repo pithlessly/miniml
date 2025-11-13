@@ -44,9 +44,9 @@ and  con  = {
               info : con_info;
             }
 and  con_info =
-            | CIAlias
-            | CIDatatype of cvar list ref
-            | CIRecord of field list ref
+            | Alias
+            | Datatype of cvar list ref
+            | Record of field list ref
 
 type pat      = (var, cvar, field, void) Common_syntax.pat
 type binding  = (var, cvar, field, void) Common_syntax.binding

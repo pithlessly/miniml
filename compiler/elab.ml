@@ -175,18 +175,18 @@ let initial_ctx
       (match adt_ty with
       | CTCon (con, _) ->
         (match con.info with
-        | CIDatatype cvars -> cvars := cvar :: deref cvars
+        | Datatype cvars -> cvars := cvar :: deref cvars
         | _ -> invalid_arg "impossible: can't add a constructor")
       | _ -> invalid_arg "impossible: can't add a constructor");
       ctx := Ctx.layer_extend_con (deref ctx) cvar
     in
     let add_ty name arity =
-      let con : con = { name; id = next_con_id (); arity; info = CIDatatype (ref []) } in
+      let con : con = { name; id = next_con_id (); arity; info = Datatype (ref []) } in
       (ctx := Ctx.layer_extend_ty (deref ctx) (Nominal con); con)
     in
     let add_alias name def =
       let arity = 0 in (* the stdlib only needs nullary aliases *)
-      let con : con = { name; id = next_con_id (); arity; info = CIAlias } in
+      let con : con = { name; id = next_con_id (); arity; info = Alias } in
       (ctx := Ctx.layer_extend_ty (deref ctx) (Alias (con, [], def)); def)
     in
     let add_mod name m =
@@ -380,9 +380,9 @@ let preprocess_constructor_args
       | CUVar _ -> Ok None
       | CTCon (con, args) ->
         match con.info with
-        | CIAlias    -> Error (E "should be impossible to find a type alias here?")
-        | CIRecord _ -> Error (E "records do not have data constructors")
-        | CIDatatype cvars ->
+        | Alias    -> Error (E "should be impossible to find a type alias here?")
+        | Record _ -> Error (E "records do not have data constructors")
+        | Datatype cvars ->
           match List.find_opt (fun (cv : cvar) -> cv.name = name) (deref cvars) with
           | None -> Error (E ("data type " ^ con.name ^ " has no constructor " ^ name))
           | Some cv -> Ok (Some cv)
@@ -428,7 +428,7 @@ let visit_record_fields
      immediately. Otherwise, we have to wait until we see the first field. *)
   let record_info_ref : (string * field list) option ref =
     ref (match ground ty with
-         | CTCon ({ name = record_name; info = CIRecord (fs_ref : field list ref); _ }, _)
+         | CTCon ({ name = record_name; info = Record (fs_ref : field list ref); _ }, _)
              -> Some (record_name, deref fs_ref)
          | _ -> None)
   in
@@ -445,7 +445,7 @@ let visit_record_fields
                        | None -> Error (err_sp ("unknown record field: " ^ field_name) sp)
           in
           match ground field.record_ty with
-          | CTCon ({ name = record_name; info = CIRecord (fs_ref : field list ref); _ }, _) ->
+          | CTCon ({ name = record_name; info = Record (fs_ref : field list ref); _ }, _) ->
             (match deref fs_ref with
              | [] -> invalid_arg "impossible: record cannot have empty list of fields"
              | fields -> Ok (record_name, fields))
@@ -590,7 +590,7 @@ let new_elaborator () : elaborator =
           (* we need to have the `con_info` immediately, but we don't actually want
              to calculate the field types until later, so we initially make it empty *)
           let cvars_ref : cvar list ref = ref [] in
-          let con = make_con (CIDatatype cvars_ref) () in
+          let con = make_con (Datatype cvars_ref) () in
           (* stage 1 *)
           let add_adts ctx =
             let* ctx = prev_add_adts ctx in
@@ -623,7 +623,7 @@ let new_elaborator () : elaborator =
           (* we need to have the `con_info` immediately, but we don't actually want
              to calculate the field types until later, so we initially make it empty *)
           let fields_ref : field list ref = ref [] in
-          let con = make_con (CIRecord fields_ref) () in
+          let con = make_con (Record fields_ref) () in
           (* stage 1 *)
           let add_adts ctx =
             let* ctx = prev_add_adts ctx in
@@ -652,7 +652,7 @@ let new_elaborator () : elaborator =
             Ok (List.fold_left Ctx.extend_fld ctx fields')
           in Ok (add_adts, prev_add_aliases, add_terms)
         | Alias ty ->
-          let con = make_con CIAlias () in
+          let con = make_con Alias () in
           (* stage 2 *)
           let add_aliases ctx =
             let* ctx = prev_add_aliases ctx in
@@ -897,9 +897,9 @@ let new_elaborator () : elaborator =
         | CUVar _  -> Error (err_sp "cannot project out of expression of unknown type" sp)
         | CTCon (con, args) ->
           match con.info with
-          | CIAlias      -> Error (E "should be impossible to find a type alias here?")
-          | CIDatatype _ -> Error (E "cannot project out of a datatype")
-          | CIRecord fields -> Ok (con.name, fields, args)
+          | Alias      -> Error (E "should be impossible to find a type alias here?")
+          | Datatype _ -> Error (E "cannot project out of a datatype")
+          | Record fields -> Ok (con.name, fields, args)
       in
       let* field =
         match
