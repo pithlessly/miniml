@@ -45,7 +45,7 @@ and  con  = {
             }
 and  con_info =
             | CIAlias
-            | CIDatatype
+            | CIDatatype of cvar list ref
             | CIRecord of field list ref
 
 type pat      = (var, cvar, field, void) Common_syntax.pat

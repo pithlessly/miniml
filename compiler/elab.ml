@@ -175,7 +175,7 @@ let initial_ctx
                  type_params; param_tys; adt_ty }
     in
     let add_ty name arity =
-      let con : con = { name; id = next_con_id (); arity; info = CIDatatype } in
+      let con : con = { name; id = next_con_id (); arity; info = CIDatatype (ref []) } in
       (ctx := Ctx.layer_extend_ty (deref ctx) (CNominal con); con)
     in
     let add_alias name def =
@@ -564,7 +564,10 @@ let new_elaborator () : elaborator =
         in
         match decl with
         | Ast.(Datatype constructors) ->
-          let con = make_con CIDatatype () in
+          (* we need to have the `con_info` immediately, but we don't actually want
+             to calculate the field types until later, so we initially make it empty *)
+          let cvars_ref : cvar list ref = ref [] in
+          let con = make_con (CIDatatype cvars_ref) () in
           (* stage 1 *)
           let add_adts ctx =
             let* ctx = prev_add_adts ctx in
@@ -574,22 +577,22 @@ let new_elaborator () : elaborator =
           let adt_ty = CTCon (con, List.map (fun qv -> CQVar qv) type_params) in
           let add_terms ctx =
             let* ctx = prev_add_terms ctx in
-            (ctx, constructors)
-            ||> fold_left_m error_monad (fun ctx (name, param_tys) ->
-              let* () = match Ctx.lookup_con name ctx with
-                        | Some _ -> (* we don't yet know how to disambiguate *)
-                                    Error (E ("duplicate constructor name: " ^ name))
-                        | None   -> Ok () in
-              let* param_tys' = map_m error_monad (translate_ast_typ ctx tvs) param_tys
-              in Ok (Ctx.extend_con ctx {
-                name;
-                id = next_var_id ();
-                provenance = User;
-                type_params;
-                param_tys = param_tys';
-                adt_ty;
-              })
-            )
+            let* cvars =
+              constructors |> map_m error_monad (fun (name, param_tys) ->
+                let* param_tys' = map_m error_monad (translate_ast_typ ctx tvs) param_tys in
+                let cvar : cvar = {
+                  name;
+                  id = next_var_id ();
+                  provenance = User;
+                  type_params;
+                  param_tys = param_tys';
+                  adt_ty;
+                }
+                in Ok cvar)
+            in
+            (* backpatch the list of ADT constructors *)
+            cvars_ref := cvars;
+            Ok (List.fold_left Ctx.extend_con ctx cvars)
           in Ok (add_adts, prev_add_aliases, add_terms)
         | Ast.(Record []) ->
           Error (E "empty records are not allowed")
@@ -609,8 +612,6 @@ let new_elaborator () : elaborator =
             let* ctx = prev_add_terms ctx in
             let* (_, fields') =
               (fields, 0) ||> map_m error_state_monad (fun (name, sp, ty) idx ->
-                (* unlike with constructors, we are OK with shadowing of
-                   record fields *)
                 let* field_ty = translate_ast_typ ctx tvs ty in
                 let field : field = {
                   name;
@@ -623,7 +624,7 @@ let new_elaborator () : elaborator =
                 in Ok (idx + 1, field)
               )
             in
-            (* update things *)
+            (* backpatch the list of record fields *)
             fields_ref := fields';
             Ok (List.fold_left Ctx.extend_fld ctx fields')
           in Ok (add_adts, prev_add_aliases, add_terms)
@@ -873,8 +874,8 @@ let new_elaborator () : elaborator =
         | CUVar _  -> Error (err_sp "cannot project out of expression of unknown type" sp)
         | CTCon (con, args) ->
           match con.info with
-          | CIAlias    -> Error (E "should be impossible to find a type alias here?")
-          | CIDatatype -> Error (E "cannot project out of a datatype")
+          | CIAlias      -> Error (E "should be impossible to find a type alias here?")
+          | CIDatatype _ -> Error (E "cannot project out of a datatype")
           | CIRecord fields -> Ok (con.name, fields, args)
       in
       let* field =
