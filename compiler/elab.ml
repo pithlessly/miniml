@@ -497,7 +497,7 @@ let new_elaborator () : elaborator =
       function
       | Ast.(TVar (s, sp)) ->
         (match tvs.lookup s with
-        | None -> Error (err_sp ("(impossible?) binding not found for tvar: " ^ s) sp)
+        | None -> Error (err_sp ("type variable not in scope: " ^ s) sp)
         | Some ty -> Ok ty)
       | Ast.(TCon (MModule mod_name :: ms, name, sp, args)) ->
         (match Ctx.extend_open_over ctx mod_name with
