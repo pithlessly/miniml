@@ -11,23 +11,23 @@ let show_ty : typ -> string =
       if prec <= thresh then f else
       fun acc -> "(" :: f (")" :: acc) in
     match ty with
-    | CQVar { name; _ } -> fun acc -> "'" :: name :: acc
-    | CUVar r -> (match deref r with
-                  | Known ty -> go prec ty
-                  | Unknown (s, _, lvl) ->
-                    fun acc -> ("?" ^ s ^ "(" ^ string_of_int lvl ^ ")") :: acc)
-    | CTCon ({ name = "->"; _ }, [a; b]) ->
+    | QVar { name; _ } -> fun acc -> "'" :: name :: acc
+    | UVar r -> (match deref r with
+                 | Known ty -> go prec ty
+                 | Unknown (s, _, lvl) ->
+                   fun acc -> ("?" ^ s ^ "(" ^ string_of_int lvl ^ ")") :: acc)
+    | TCon ({ name = "->"; _ }, [a; b]) ->
       let a = go 1 a and b = go 0 b in
       wrap_if 0 (fun acc -> a (" -> " :: b acc))
-    | CTCon ({ name = "*"; _ }, []) -> fun acc -> "unit" :: acc
-    | CTCon ({ name = "*"; _ }, a :: args) ->
+    | TCon ({ name = "*"; _ }, []) -> fun acc -> "unit" :: acc
+    | TCon ({ name = "*"; _ }, a :: args) ->
       let a = go 2 a and args = List.map (go 2) args in
       wrap_if 1 (fun acc -> a (List.fold_right
                                 (fun arg acc -> " * " :: arg acc) args acc))
-    | CTCon ({ name; _ }, []) -> fun acc -> name :: acc
-    | CTCon ({ name; _ }, [a]) ->
+    | TCon ({ name; _ }, []) -> fun acc -> name :: acc
+    | TCon ({ name; _ }, [a]) ->
       let a = go 2 a in fun acc -> a (" " :: name :: acc)
-    | CTCon ({ name; _ }, a :: args) ->
+    | TCon ({ name; _ }, a :: args) ->
       let a = go 0 a and args = List.map (go 0) args in
       fun acc -> "(" :: a (List.fold_right
                             (fun arg acc -> ", " :: arg acc)
@@ -36,7 +36,7 @@ let show_ty : typ -> string =
   in fun ty -> String.concat "" (go 0 ty [])
 
 (* A type variable scope, or tvs, is responsible for assigning each syntactic type variable
-   (just a string) to a type in the core (usually either a `CQVar` or `CUVar`).
+   (just a string) to a type in the core (usually either a `QVar` or `UVar`).
    This can work in one of two ways:
    - A "static" type variable scope is used when we refer to type variables in a type declaration
      and only supports a given set of type variables fixed in advance (the parameters).
@@ -64,14 +64,14 @@ let tvs_new_dynamic (new_ty : string option -> typ) () =
 
 let rec occurs_check (v : uvar ref) : typ -> unit m_result =
   function
-  | CQVar _ -> Ok ()
-  | CTCon (_, tys) ->
+  | QVar _ -> Ok ()
+  | TCon (_, tys) ->
     let rec go =
       function
       | []         -> Ok ()
       | ty' :: tys -> let* () = occurs_check v ty' in go tys
     in go tys
-  | CUVar v' ->
+  | UVar v' ->
     if v == v' then
       Error (E "occurs check failed (cannot construct infinite type)")
     else
@@ -89,11 +89,9 @@ let rec occurs_check (v : uvar ref) : typ -> unit m_result =
 let ground : typ -> typ =
   let rec go ty (obligations : uvar ref list) =
     match ty with
-    | CUVar r -> (
-        match deref r with
-        | Known ty -> go ty (r :: obligations)
-        | _ -> (ty, obligations)
-      )
+    | UVar r -> (match deref r with
+                | Known ty -> go ty (r :: obligations)
+                | _ -> (ty, obligations))
     | _ -> (ty, obligations)
   in
   fun ty ->
@@ -103,25 +101,25 @@ let ground : typ -> typ =
     ty
 
 let unexpected_qvar ({ name; id } : qvar) =
-  E ("found CQVar (" ^ name ^ " " ^ string_of_int id ^ ") - should be impossible")
+  E ("found QVar (" ^ name ^ " " ^ string_of_int id ^ ") - should be impossible")
 
 let rec unify : typ -> typ -> unit m_result = fun t1 t2 ->
   (* FIXME: avoid physical equality on types? *)
   if t1 == t2 then Ok () else
   match (ground t1, ground t2) with
-  | (CQVar qv, _) | (_, CQVar qv) -> Error (unexpected_qvar qv)
-  | (CUVar r, t') | (t', CUVar r) ->
+  | (QVar qv, _) | (_, QVar qv) -> Error (unexpected_qvar qv)
+  | (UVar r, t') | (t', UVar r) ->
     (* r must be Unknown *)
     if
       match t' with
-      | CUVar r' -> r == r'
-      | _        -> false
+      | UVar r' -> r == r'
+      | _       -> false
     then
       Ok ()
     else
       let* () = occurs_check r t' in
       Ok (r := Known t')
-  | (CTCon (c1, p1), CTCon (c2, p2)) ->
+  | (TCon (c1, p1), TCon (c2, p2)) ->
     if c1.id <> c2.id then
       Error (E ("cannot unify different type constructors: " ^ c1.name ^ " != " ^ c2.name))
     else unify_all p1 p2
@@ -156,11 +154,11 @@ let initial_ctx
      they have the same ID, but this is only used to distinguish
      them during instantiation *)
   let a = new_qvar "a" () in
-  let qa  = [a] and a = CQVar a in
+  let qa  = [a] and a = QVar a in
   let b = new_qvar "b" () in
-  let qab = b :: qa and b = CQVar b in
+  let qab = b :: qa and b = QVar b in
   let c = new_qvar "c" () in
-  let qabc = c :: qab and c = CQVar c in
+  let qabc = c :: qab and c = QVar c in
   let rec mk_ctx callback prefix =
     let ctx = ref Ctx.empty_layer in
     let provenance = Builtin prefix in
@@ -173,7 +171,7 @@ let initial_ctx
       let cvar : cvar = { name; id = next_var_id (); provenance;
                           type_params; param_tys; adt_ty } in
       (match adt_ty with
-      | CTCon (con, _) ->
+      | TCon (con, _) ->
         (match con.info with
         | Datatype cvars -> cvars := cvar :: deref cvars
         | _ -> invalid_arg "impossible: can't add a constructor")
@@ -201,12 +199,12 @@ let initial_ctx
       types = Option.unwrap (deref types) }
   in
   top_level (fun add add_con add_ty add_alias add_mod ->
-    let ty0 name = CTCon (add_ty name 0, [])
-    and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, [a])
-    and ty2 name = let c = add_ty name 2 in fun a b -> CTCon (c, [a; b])
+    let ty0 name = TCon (add_ty name 0, [])
+    and ty1 name = let c = add_ty name 1 in fun a -> TCon (c, [a])
+    and ty2 name = let c = add_ty name 2 in fun a b -> TCon (c, [a; b])
     in
     let t_tuple_con = add_ty "*" (0 - 1) (* TODO: this feels janky? *) in
-    let t_tuple ts = CTCon (t_tuple_con, ts) in
+    let t_tuple ts = TCon (t_tuple_con, ts) in
     let (-->) = ty2 "->"
     and t_unit = add_alias "unit" (t_tuple [])
     and t_char = ty0 "char"
@@ -319,8 +317,8 @@ let initial_ctx
       ))
     );
     add_mod "StringMap" (mk_ctx (fun add add_con add_ty _ _ ->
-      let ty0 name = CTCon (add_ty name 0, [])
-      and ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, [a])
+      let ty0 name = TCon (add_ty name 0, [])
+      and ty1 name = let c = add_ty name 1 in fun a -> TCon (c, [a])
       in
       let t = ty1 "t" in
       add "empty"     qa  (t a);
@@ -336,7 +334,7 @@ let initial_ctx
       ()
     ));
     add_mod "IntMap" (mk_ctx (fun add _ add_ty _ _ ->
-      let ty1 name = let c = add_ty name 1 in fun a -> CTCon (c, [a]) in
+      let ty1 name = let c = add_ty name 1 in fun a -> TCon (c, [a]) in
       let t = ty1 "t" in
       add "empty"  qa (t a);
       add "lookup" qa (t_int --> (t a --> t_option a));
@@ -376,9 +374,9 @@ let preprocess_constructor_args
     let out_ty = ground out_ty in
     let* known_cv =
       match out_ty with
-      | CQVar qv -> Error (unexpected_qvar qv)
-      | CUVar _ -> Ok None
-      | CTCon (con, args) ->
+      | QVar qv -> Error (unexpected_qvar qv)
+      | UVar _ -> Ok None
+      | TCon (con, args) ->
         match con.info with
         | Alias    -> Error (E "should be impossible to find a type alias here?")
         | Record _ -> Error (E "records do not have data constructors")
@@ -428,7 +426,7 @@ let visit_record_fields
      immediately. Otherwise, we have to wait until we see the first field. *)
   let record_info_ref : (string * field list) option ref =
     ref (match ground ty with
-         | CTCon ({ name = record_name; info = Record (fs_ref : field list ref); _ }, _)
+         | TCon ({ name = record_name; info = Record (fs_ref : field list ref); _ }, _)
              -> Some (record_name, deref fs_ref)
          | _ -> None)
   in
@@ -445,7 +443,7 @@ let visit_record_fields
                        | None -> Error (err_sp ("unknown record field: " ^ field_name) sp)
           in
           match ground field.record_ty with
-          | CTCon ({ name = record_name; info = Record (fs_ref : field list ref); _ }, _) ->
+          | TCon ({ name = record_name; info = Record (fs_ref : field list ref); _ }, _) ->
             (match deref fs_ref with
              | [] -> invalid_arg "impossible: record cannot have empty list of fields"
              | fields -> Ok (record_name, fields))
@@ -490,7 +488,7 @@ let new_elaborator () : elaborator =
                | Some n -> n
                (* TODO: do this calculation lazily? *)
                | None   -> string_of_int id
-    in CUVar (ref (Unknown (name, id, lvl)))
+    in UVar (ref (Unknown (name, id, lvl)))
   in
   let new_uvars lvl name xs () =
     xs |> List.mapi (fun i x ->
@@ -509,14 +507,14 @@ let new_elaborator () : elaborator =
     (* substitute N types for N variables (qvars) in typ *)
     let rec subst (rho : (qvar * typ) list) typ =
       match ground typ with
-      | CQVar qv ->
+      | QVar qv ->
         (match List.find_opt (fun ((qv' : qvar), _) -> qv.id = qv'.id) rho with
          | Some (_, ty) -> Ok ty
          | None -> Error (E ("impossible: unknown qvar " ^ qv.name ^ " while substituting")))
-      | CUVar _ -> Error (E "impossible: known types shouldn't have any unknown uvars?")
-      | CTCon (c, args) ->
+      | UVar _ -> Error (E "impossible: known types shouldn't have any unknown uvars?")
+      | TCon (c, args) ->
         let* args' = map_m error_monad (subst rho) args in
-        Ok (CTCon (c, args'))
+        Ok (TCon (c, args'))
     in
     let rec go ctx : Ast.typ -> typ m_result =
       function
@@ -539,7 +537,7 @@ let new_elaborator () : elaborator =
           else
             let* args' = map_m error_monad (go ctx) args in
             match decl with
-            | Nominal _ -> Ok (CTCon (con, args'))
+            | Nominal _ -> Ok (TCon (con, args'))
             | Alias (_, params, definition) ->
               subst (List.map2 (fun p a -> (p, a)) params args') definition)
       | THole ->
@@ -568,7 +566,7 @@ let new_elaborator () : elaborator =
         let* (type_params_map : typ StringMap.t) =
           (StringMap.empty, type_params_qvs)
           ||> fold_left_m error_monad (fun acc (s, qv) ->
-            match StringMap.insert s (CQVar qv) acc with
+            match StringMap.insert s (QVar qv) acc with
             | Some map -> Ok map
             | None -> Error (E ("type declaration " ^ name ^
                                 " has duplicate type parameter '" ^ s))
@@ -597,7 +595,7 @@ let new_elaborator () : elaborator =
             Ok (Ctx.extend_ty ctx (Nominal con))
           in
           (* stage 3 *)
-          let adt_ty = CTCon (con, List.map (fun qv -> CQVar qv) type_params) in
+          let adt_ty = TCon (con, List.map (fun qv -> QVar qv) type_params) in
           let add_terms ctx =
             let* ctx = prev_add_terms ctx in
             let* cvars =
@@ -630,7 +628,7 @@ let new_elaborator () : elaborator =
             Ok (Ctx.extend_ty ctx (Nominal con))
           in
           (* stage 3 *)
-          let record_ty = CTCon (con, List.map (fun qv -> CQVar qv) type_params) in
+          let record_ty = TCon (con, List.map (fun qv -> QVar qv) type_params) in
           let add_terms ctx =
             let* ctx = prev_add_terms ctx in
             let* (_, fields') =
@@ -670,19 +668,19 @@ let new_elaborator () : elaborator =
     (* TODO: we don't need to return a new type list here *)
     let rec go ty qvars =
       match ty with
-      | CQVar qv -> (qvars, ty)
-      | CTCon (c, tys) ->
+      | QVar qv -> (qvars, ty)
+      | TCon (c, tys) ->
         let (qvars, tys) = go_list tys qvars in
-        (qvars, (CTCon (c, tys)))
-      | CUVar r ->
+        (qvars, (TCon (c, tys)))
+      | UVar r ->
         match deref r with
         | Known ty -> go ty qvars
         | Unknown (name, id, lvl') ->
           if lvl' > lvl then
             let qv = new_qvar name () in
             let qvars = qv :: qvars in
-            r := Known (CQVar qv);
-            (qvars, CQVar qv)
+            r := Known (QVar qv);
+            (qvars, QVar qv)
           else
             (qvars, ty)
     and go_list tys qvars =
@@ -692,16 +690,16 @@ let new_elaborator () : elaborator =
   let instantiate lvl (qvars : qvar list) () : typ -> typ =
     let qvars = List.map (fun (qv : qvar) -> (qv, new_uvar lvl (Some qv.name) ())) qvars in
     let rec go ty = match ty with
-                    | CQVar (qv : qvar) -> (
+                    | QVar (qv : qvar) -> (
                       match List.find_opt (fun ((qv' : qvar), _) -> qv.id = qv'.id) qvars with
                       | None -> new_uvar lvl (
                                   Some ("<error: unexpected qvar here: " ^ qv.name ^ ">")) ()
                       | Some (_, uv) -> uv)
-                    | CUVar r -> (
+                    | UVar r -> (
                       match deref r with
                       | Known ty -> go ty
                       | Unknown (_, _, _) -> ty)
-                    | CTCon (c, tys) -> CTCon (c, List.map go tys)
+                    | TCon (c, tys) -> TCon (c, List.map go tys)
     in go
   in
   (* Elaboration of patterns requires two phases. Originally we just traversed the pattern
@@ -893,9 +891,9 @@ let new_elaborator () : elaborator =
       let* (e', e_ty) = infer lvl ctx e in
       let* (con_name, fields, args) =
         match ground e_ty with
-        | CQVar qv -> Error (unexpected_qvar qv)
-        | CUVar _  -> Error (err_sp "cannot project out of expression of unknown type" sp)
-        | CTCon (con, args) ->
+        | QVar qv -> Error (unexpected_qvar qv)
+        | UVar _  -> Error (err_sp "cannot project out of expression of unknown type" sp)
+        | TCon (con, args) ->
           match con.info with
           | Alias      -> Error (E "should be impossible to find a type alias here?")
           | Datatype _ -> Error (E "cannot project out of a datatype")

@@ -32,9 +32,9 @@ and  field = {
               record_ty : typ;
               field_ty : typ;
              }
-and  typ  = | CQVar of qvar
-            | CUVar of uvar ref
-            | CTCon of con * typ list
+and  typ  = | QVar of qvar
+            | UVar of uvar ref
+            | TCon of con * typ list
 and  uvar = | Unknown of string * var_id * level
             | Known   of typ
 and  con  = {
