@@ -52,8 +52,8 @@ type pat      = (var, cvar, field, void) Common_syntax.pat
 type binding  = (var, cvar, field, void) Common_syntax.binding
 type bindings = (var, cvar, field, void) Common_syntax.bindings
 type expr     = (var, cvar, field, void) Common_syntax.expr
-type tydecl = | CNominal  of con
-              | CAlias    of con
-                           * qvar list (* parameters *)
-                           * typ       (* definition *)
+type tydecl = | Nominal  of con
+              | Alias    of con
+                          * qvar list (* parameters *)
+                          * typ       (* definition *)
 type core = bindings list

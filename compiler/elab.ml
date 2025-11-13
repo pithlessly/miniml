@@ -182,12 +182,12 @@ let initial_ctx
     in
     let add_ty name arity =
       let con : con = { name; id = next_con_id (); arity; info = CIDatatype (ref []) } in
-      (ctx := Ctx.layer_extend_ty (deref ctx) (CNominal con); con)
+      (ctx := Ctx.layer_extend_ty (deref ctx) (Nominal con); con)
     in
     let add_alias name def =
       let arity = 0 in (* the stdlib only needs nullary aliases *)
       let con : con = { name; id = next_con_id (); arity; info = CIAlias } in
-      (ctx := Ctx.layer_extend_ty (deref ctx) (CAlias (con, [], def)); def)
+      (ctx := Ctx.layer_extend_ty (deref ctx) (Alias (con, [], def)); def)
     in
     let add_mod name m =
       ctx := Ctx.layer_extend_mod (deref ctx) { name; layer = m (prefix ^ name ^ ".") }
@@ -532,15 +532,15 @@ let new_elaborator () : elaborator =
         match Ctx.lookup_ty name ctx with
         | None -> Error (E ("type constructor not in scope: " ^ name))
         | Some decl ->
-          let (CNominal con | CAlias (con, _, _)) = decl in
+          let (Nominal con | Alias (con, _, _)) = decl in
           if con.arity >= 0 && con.arity <> List.length args then
             Error (err_sp ("type constructor " ^ name ^ " expects "
                             ^ string_of_int con.arity ^ " argument(s)") sp)
           else
             let* args' = map_m error_monad (go ctx) args in
             match decl with
-            | CNominal _ -> Ok (CTCon (con, args'))
-            | CAlias (_, params, definition) ->
+            | Nominal _ -> Ok (CTCon (con, args'))
+            | Alias (_, params, definition) ->
               subst (List.map2 (fun p a -> (p, a)) params args') definition)
       | THole ->
         match tvs.hole () with
@@ -594,7 +594,7 @@ let new_elaborator () : elaborator =
           (* stage 1 *)
           let add_adts ctx =
             let* ctx = prev_add_adts ctx in
-            Ok (Ctx.extend_ty ctx (CNominal con))
+            Ok (Ctx.extend_ty ctx (Nominal con))
           in
           (* stage 3 *)
           let adt_ty = CTCon (con, List.map (fun qv -> CQVar qv) type_params) in
@@ -627,7 +627,7 @@ let new_elaborator () : elaborator =
           (* stage 1 *)
           let add_adts ctx =
             let* ctx = prev_add_adts ctx in
-            Ok (Ctx.extend_ty ctx (CNominal con))
+            Ok (Ctx.extend_ty ctx (Nominal con))
           in
           (* stage 3 *)
           let record_ty = CTCon (con, List.map (fun qv -> CQVar qv) type_params) in
@@ -651,16 +651,16 @@ let new_elaborator () : elaborator =
             fields_ref := fields';
             Ok (List.fold_left Ctx.extend_fld ctx fields')
           in Ok (add_adts, prev_add_aliases, add_terms)
-        | Ast.(Alias ty) ->
+        | Alias ty ->
           let con = make_con CIAlias () in
           (* stage 2 *)
           let add_aliases ctx =
             let* ctx = prev_add_aliases ctx in
             let* ty' = translate_ast_typ ctx tvs ty in
             Ok (Ctx.extend_ty ctx (
-              CAlias (con,
-                      type_params,
-                      ty')))
+              Alias (con,
+                     type_params,
+                     ty')))
           in Ok (prev_add_adts, add_aliases, prev_add_terms)
       ) ((fun c -> Ok c), (fun c -> Ok c), (fun c -> Ok c))
     in
