@@ -362,9 +362,10 @@ let preprocess_constructor_args
   (instantiate : qvar list -> unit -> typ -> typ)
   (mk_tuple : 'a list -> 'a)
   (ctx : Ctx.t)
+  (out_ty : typ)
   ((name, sp) : string * span)
   (args : 'a list option)
-: (cvar * typ list * typ * 'a list) m_result =
+: (cvar * typ list * 'a list) m_result =
   let* cv =
     match Ctx.lookup_con name ctx with
     | None    -> Error (err_sp ("constructor not in scope: " ^ name) sp)
@@ -373,6 +374,7 @@ let preprocess_constructor_args
   let instantiate = instantiate cv.type_params () in
   let param_tys = List.map instantiate cv.param_tys in
   let result_ty = instantiate cv.adt_ty in
+  let* () = unify result_ty out_ty in
   (* make sure we're applying the constructor to the right number of arguments.
      as a special case, passing the "wrong" number of arguments to a 1-param
      tuple, like `Some (1, 2)`, causes it to be treated as a tuple. *)
@@ -389,7 +391,7 @@ let preprocess_constructor_args
                           else Error (E ("constructor " ^ name
                                          ^ " is applied to the wrong number of arguments"))
   in
-  Ok (cv, param_tys, result_ty, args)
+  Ok (cv, param_tys, args)
 
 let visit_record_fields
   (instantiate : qvar list -> unit -> typ -> typ)
@@ -746,17 +748,14 @@ let new_elaborator () : elaborator =
         let* ps' = map_m error_monad (go ctx ty_elem) ps in
         Ok (PList ps')
       | PCon (name, args) ->
-        (* TODO: it is possible to use the result type to aid in name lookup *)
         let* ((cv : cvar),
               (param_tys : typ list),
-              (result_ty : typ),
               (args : Ast.pat list))
-        = preprocess_constructor_args (instantiate lvl) (fun es -> PTuple es)
-                                      ctx name args
+        = preprocess_constructor_args
+            (instantiate lvl)
+            (fun es -> PTuple es)
+            ctx ty name args
         in
-        (* TODO: perhaps change the signature of `preprocess_constructor_args`
-           so that this is an input instead of an output *)
-        let* () = unify result_ty ty in
         let* args' = map2_m error_monad (go ctx) param_tys args in
         Ok (PCon (cv, Some args'))
       | PCharLit c   -> let* () = unify ty t_char   in Ok (PCharLit c)
@@ -843,17 +842,14 @@ let new_elaborator () : elaborator =
       let* es' = map_m error_monad (infer_at lvl ctx ty_elem) es in
       Ok (List es')
     | Con (name, args) ->
-      (* TODO: it is possible to use the result type to aid in name lookup *)
       let* ((cv : cvar),
             (param_tys : typ list),
-            (result_ty : typ),
             (args : Ast.expr list))
-      = preprocess_constructor_args (instantiate lvl) (fun es -> Tuple es)
-                                    ctx name args
+      = preprocess_constructor_args
+          (instantiate lvl)
+          (fun es -> Tuple es)
+          ctx ty name args
       in
-      (* TODO: perhaps change the signature of `preprocess_constructor_args`
-         so that this is an input instead of an output *)
-      let* () = unify result_ty ty in
       let* args' = map2_m error_monad (infer_at lvl ctx) param_tys args in
       Ok (Con (cv, Some args'))
     | CharLit c -> let* () = unify ty t_char   in Ok (CharLit c)
