@@ -367,9 +367,29 @@ let preprocess_constructor_args
   (args : 'a list option)
 : (cvar * typ list * 'a list) m_result =
   let* cv =
-    match Ctx.lookup_con name ctx with
-    | None    -> Error (err_sp ("constructor not in scope: " ^ name) sp)
+    let out_ty = ground out_ty in
+    let* known_cv =
+      match out_ty with
+      | CQVar qv -> Error (unexpected_qvar qv)
+      | CUVar _ -> Ok None
+      | CTCon (con, args) ->
+        match con.info with
+        | CIAlias    -> Error (E "should be impossible to find a type alias here?")
+        | CIRecord _ -> Error (E "records do not have data constructors")
+        | CIDatatype cvars ->
+          match deref cvars with
+          | [] -> Ok None
+          | cvars ->
+            match List.find_opt (fun (cv : cvar) -> cv.name = name) cvars with
+            | None -> Error (E ("data type " ^ con.name ^ " has no constructor " ^ name))
+            | Some cv -> Ok (Some cv)
+    in
+    match known_cv with
     | Some cv -> Ok cv
+    | None ->
+      match Ctx.lookup_con name ctx with
+      | None    -> Error (err_sp ("constructor not in scope: " ^ name) sp)
+      | Some cv -> Ok cv
   in
   let instantiate = instantiate cv.type_params () in
   let param_tys = List.map instantiate cv.param_tys in
