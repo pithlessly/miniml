@@ -31,7 +31,7 @@ let lookup_con : string -> t ->   Core.cvar option = find (fun l -> l.cvars)
 let lookup_fld : string -> t ->  Core.field option = find (fun l -> l.fields)
                                                           (fun field -> field.name)
 let lookup_ty  : string -> t -> Core.tydecl option = find (fun l -> l.tydecls)
-                                                          (fun Core.(CNominal con | CAlias (con, _, _)) -> con.name)
+                                                          (fun (Nominal con | Alias (con, _, _)) -> con.name)
 let lookup_mod : string -> t ->     module_ option = find (fun l -> l.modules)
                                                           (fun m -> m.name)
 

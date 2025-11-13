@@ -32,9 +32,9 @@ and  field = {
               record_ty : typ;
               field_ty : typ;
              }
-and  typ  = | CQVar of qvar
-            | CUVar of uvar ref
-            | CTCon of con * typ list
+and  typ  = | QVar of qvar
+            | UVar of uvar ref
+            | TCon of con * typ list
 and  uvar = | Unknown of string * var_id * level
             | Known   of typ
 and  con  = {
@@ -44,16 +44,16 @@ and  con  = {
               info : con_info;
             }
 and  con_info =
-            | CIAlias
-            | CIDatatype
-            | CIRecord of field list ref
+            | Alias
+            | Datatype of cvar list ref
+            | Record of field list ref
 
 type pat      = (var, cvar, field, void) Common_syntax.pat
 type binding  = (var, cvar, field, void) Common_syntax.binding
 type bindings = (var, cvar, field, void) Common_syntax.bindings
 type expr     = (var, cvar, field, void) Common_syntax.expr
-type tydecl = | CNominal  of con
-              | CAlias    of con
-                           * qvar list (* parameters *)
-                           * typ       (* definition *)
+type tydecl = | Nominal  of con
+              | Alias    of con
+                          * qvar list (* parameters *)
+                          * typ       (* definition *)
 type core = bindings list

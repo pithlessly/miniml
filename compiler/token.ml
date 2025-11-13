@@ -4,7 +4,7 @@ let describe_span ({ line_no } : span) : string =
   if line_no = 0 - 1 then "(dummy)"
   else "(near line " ^ string_of_int line_no ^ ")"
 
-let err_sp msg sp = Util.(E (msg ^ " " ^ describe_span sp))
+let err_sp msg sp : Util.error = E (msg ^ " " ^ describe_span sp)
 
 type token =
   | OpenParen
