@@ -518,17 +518,17 @@ let new_elaborator () : elaborator =
         let* args' = map_m error_monad (subst rho) args in
         Ok (CTCon (c, args'))
     in
-    let rec go ctx =
+    let rec go ctx : Ast.typ -> typ m_result =
       function
-      | Ast.(TVar (s, sp)) ->
+      | TVar (s, sp) ->
         (match tvs.lookup s with
         | None -> Error (err_sp ("type variable not in scope: " ^ s) sp)
         | Some ty -> Ok ty)
-      | Ast.(TCon (MModule mod_name :: ms, name, sp, args)) ->
+      | TCon (MModule mod_name :: ms, name, sp, args) ->
         (match Ctx.extend_open_over ctx mod_name with
          | None     -> Error (E ("module not in scope: " ^ mod_name))
          | Some ctx -> go ctx Ast.(TCon (ms, name, sp, args)))
-      | Ast.(TCon ([], name, sp, args)) -> (
+      | TCon ([], name, sp, args) -> (
         match Ctx.lookup_ty name ctx with
         | None -> Error (E ("type constructor not in scope: " ^ name))
         | Some decl ->
@@ -542,7 +542,7 @@ let new_elaborator () : elaborator =
             | CNominal _ -> Ok (CTCon (con, args'))
             | CAlias (_, params, definition) ->
               subst (List.map2 (fun p a -> (p, a)) params args') definition)
-      | Ast.(THole) ->
+      | THole ->
         match tvs.hole () with
         | Some ty -> Ok ty
         | None -> Error (E "type holes are not permitted in this context")
@@ -562,7 +562,7 @@ let new_elaborator () : elaborator =
           (add_terms   : Ctx.t -> Ctx.t m_result))
     = decls |>
       fold_left_m error_monad (fun (prev_add_adts, prev_add_aliases, prev_add_terms)
-                                   (type_params, name, decl) ->
+                                   (type_params, name, (decl : Ast.typ_decl)) ->
         let arity = List.length type_params in
         let type_params_qvs = List.map (fun s -> (s, new_qvar s ())) type_params in
         let* (type_params_map : typ StringMap.t) =
@@ -586,7 +586,7 @@ let new_elaborator () : elaborator =
           { name; id = next_con_id (); arity; info }
         in
         match decl with
-        | Ast.(Datatype constructors) ->
+        | Datatype constructors ->
           (* we need to have the `con_info` immediately, but we don't actually want
              to calculate the field types until later, so we initially make it empty *)
           let cvars_ref : cvar list ref = ref [] in
@@ -617,9 +617,9 @@ let new_elaborator () : elaborator =
             cvars_ref := cvars;
             Ok (List.fold_left Ctx.extend_con ctx cvars)
           in Ok (add_adts, prev_add_aliases, add_terms)
-        | Ast.(Record []) ->
+        | Record [] ->
           Error (E "empty records are not allowed")
-        | Ast.(Record fields) ->
+        | Record fields ->
           (* we need to have the `con_info` immediately, but we don't actually want
              to calculate the field types until later, so we initially make it empty *)
           let fields_ref : field list ref = ref [] in
@@ -741,7 +741,7 @@ let new_elaborator () : elaborator =
       let* v2 = ev2 in
       match StringMap.disjoint_union v1 v2 with
       | Ok v' -> Ok v'
-      | Error (StringMap.(DupErr v)) -> Error (E "variable bound multiple times in the same pattern: v")
+      | Error (DupErr v) -> Error (E "variable bound multiple times in the same pattern: v")
     in
     fun lvl pat ->
       let* bindings = go pat in
@@ -1001,7 +1001,7 @@ let new_elaborator () : elaborator =
       let sets = List.map fst bindings in
       match fold_left_m error_monad StringMap.disjoint_union StringMap.empty sets with
       | Ok combined      -> Ok combined
-      | Error (StringMap.(DupErr v)) ->
+      | Error (DupErr v) ->
         Error (E ("variable bound multiple times in a group of definitions: " ^ v))
     in
     (* the context used for the bindings contains these variables iff the binding group
@@ -1101,24 +1101,24 @@ let new_elaborator () : elaborator =
   let rec translate_decls ctx : Ast.decl list -> (Ctx.t * bindings list list) m_result =
     fun decls ->
     map_m error_state_monad
-        (fun decl ctx ->
+        (fun (decl : Ast.decl) ctx ->
           match decl with
-          | Ast.(Let bindings)    -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings in
-                                     Ok (ctx, [bindings'])
-          | Ast.(Types decls)     -> let* ctx = translate_ast_typ_decl decls ctx in
-                                     Ok (ctx, [])
-          | Ast.(Module (
-              (name, sp), decls)) -> let ctx' = Ctx.extend_new_layer ctx in
-                                     let* (ctx'', inner_bindings) = translate_decls ctx' decls in
-                                     let ctx = Ctx.extend_mod ctx {
-                                       name;
-                                       layer = ignore_all_but_the_top ctx''
-                                     } in
-                                     (* TODO: use of List.concat here is not ideal for performance *)
-                                     Ok (ctx, List.concat inner_bindings)
-          | Ast.(Open (name, sp)) -> match Ctx.extend_open_under ctx name with
-                                     | Some ctx -> Ok (ctx, [])
-                                     | None     -> Error (E ("module not in scope: " ^ name))
+          | Let bindings    -> let* (ctx, bindings') = infer_bindings (* lvl = *) 0 ctx bindings in
+                               Ok (ctx, [bindings'])
+          | Types decls     -> let* ctx = translate_ast_typ_decl decls ctx in
+                               Ok (ctx, [])
+          | Module ((name, sp), decls)
+                            -> let ctx' = Ctx.extend_new_layer ctx in
+                               let* (ctx'', inner_bindings) = translate_decls ctx' decls in
+                               let ctx = Ctx.extend_mod ctx {
+                                 name;
+                                 layer = ignore_all_but_the_top ctx''
+                               } in
+                               (* TODO: use of List.concat here is not ideal for performance *)
+                               Ok (ctx, List.concat inner_bindings)
+          | Open (name, sp) -> match Ctx.extend_open_under ctx name with
+                               | Some ctx -> Ok (ctx, [])
+                               | None     -> Error (E ("module not in scope: " ^ name))
         ) decls ctx
   in
   let current_ctx = ref initial_ctx.top_level in
