@@ -40,6 +40,9 @@ module Snoc = struct
 
   let to_list (xs : 'a snoc) : 'a list =
     to_list_append xs []
+
+  let length : 'a snoc -> int =
+    fun xs -> fold_right (fun _ n -> n + 1) xs 0
 end
 
 (* monadic operations *)
