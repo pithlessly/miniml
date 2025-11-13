@@ -170,9 +170,15 @@ let initial_ctx
                  type_params; ty }
     in
     let add_con name type_params param_tys adt_ty =
-      ctx := Ctx.layer_extend_con (deref ctx)
-               { name; id = next_var_id (); provenance;
-                 type_params; param_tys; adt_ty }
+      let cvar : cvar = { name; id = next_var_id (); provenance;
+                          type_params; param_tys; adt_ty } in
+      (match adt_ty with
+      | CTCon (con, _) ->
+        (match con.info with
+        | CIDatatype cvars -> cvars := cvar :: deref cvars
+        | _ -> invalid_arg "impossible: can't add a constructor")
+      | _ -> invalid_arg "impossible: can't add a constructor");
+      ctx := Ctx.layer_extend_con (deref ctx) cvar
     in
     let add_ty name arity =
       let con : con = { name; id = next_con_id (); arity; info = CIDatatype (ref []) } in
@@ -377,12 +383,9 @@ let preprocess_constructor_args
         | CIAlias    -> Error (E "should be impossible to find a type alias here?")
         | CIRecord _ -> Error (E "records do not have data constructors")
         | CIDatatype cvars ->
-          match deref cvars with
-          | [] -> Ok None
-          | cvars ->
-            match List.find_opt (fun (cv : cvar) -> cv.name = name) cvars with
-            | None -> Error (E ("data type " ^ con.name ^ " has no constructor " ^ name))
-            | Some cv -> Ok (Some cv)
+          match List.find_opt (fun (cv : cvar) -> cv.name = name) (deref cvars) with
+          | None -> Error (E ("data type " ^ con.name ^ " has no constructor " ^ name))
+          | Some cv -> Ok (Some cv)
     in
     match known_cv with
     | Some cv -> Ok cv
