@@ -7,7 +7,7 @@ let lower c = lower_letter c || c = '_'
 let upper c = Char.('A' <= c && c <= 'Z')
 let numer c = Char.('0' <= c && c <= '9')
 let ident c = upper c || lower c || numer c || c = '\''
-let symbolic = function | '!' | '&' | '*' | '+' | '-' | '.' | ':'
+let symbolic = function | '!' | '?' | '&' | '*' | '+' | '-' | '.' | ':'
                         | '<' | '>' | '=' | '^' | '|' | '@' | '/' -> true
                         | _ -> false
 
