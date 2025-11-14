@@ -427,6 +427,13 @@
                 (ht-key b2)))    (duplicate-key (ht-key b1)))
         (#t                      (loop-pair (develop b1) (develop b2)))))))
 
+(define hashtrie-iter (lambda (p) (lambda (m)
+  (let loop ((branch (cdr m)))
+    (cond ((null?   branch) '())
+          ((vector? branch) ((p (ht-key m)) (ht-value m)))
+          ((pair?   branch) (begin (loop (car branch))
+                                   (loop (cdr branch)) )))))))
+
 ; ====================================================
 ; StringMap primitives implemented using the hash trie
 ; ====================================================
@@ -504,4 +511,5 @@
 (define miniml-IntMap.insert (lambda (k) (lambda (v) (lambda (m)
   (define new-map (hashtrie-insert = (int-hash k) k v m))
   (if (null? new-map) m new-map)))))
-; (define (miniml-IntMap.union
+(define miniml-IntMap.fold hashtrie-fold)
+(define miniml-IntMap.iter hashtrie-iter)
