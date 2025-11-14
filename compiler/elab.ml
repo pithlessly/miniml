@@ -267,6 +267,7 @@ let initial_ctx
       add "map"        qab  ((a --> b) --> (t_list a --> t_list b));
       add "map2"       qabc ((a --> (b --> c)) --> (t_list a --> (t_list b --> t_list c)));
       add "mapi"       qab  ((t_int --> (a --> b)) --> (t_list a --> t_list b));
+      add "for_all"    qa   ((a --> t_bool) --> (t_list a --> t_bool));
       add "filter"     qa   ((a --> t_bool) --> (t_list a --> t_list a));
       add "find_opt"   qa   ((a --> t_bool) --> (t_list a --> t_option a));
       add "iter"       qa   ((a --> t_unit) --> (t_list a --> t_unit));

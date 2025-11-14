@@ -110,6 +110,12 @@
         (reverse acc)
         (let ((y ((f i) (car xs))))
           (loop (cons y acc) (+ i 1) (cdr xs))))))))
+(define miniml-List.for_all
+  (lambda (p) (lambda (xs)
+    (let loop ((xs xs))
+      (cond ((null? xs)   #t)
+            ((p (car xs)) (loop (cdr xs)))
+            (#t           #f) )))))
 (define miniml-List.filter
   (lambda (p) (lambda (xs)
     ; Avoid using Scheme builtin filter since it doesn't guarantee evaluation order.
