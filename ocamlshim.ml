@@ -32,8 +32,9 @@ let (<)  : int -> int -> bool = fun a b -> a < b
 let (>)  : int -> int -> bool = fun a b -> a > b
 
 module Option = struct
-  let map = Option.map
+  let map    = Option.map
   let unwrap = Option.get
+  let bind   = Option.bind
 end
 
 module StringMap : sig

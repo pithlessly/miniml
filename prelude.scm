@@ -195,6 +195,8 @@
   (if (pair? opt)
     (car opt)
     (error #f "Option.unwrap: None")))
+(define miniml-Option.bind (lambda (o) (lambda (k)
+  (if (null? o) o (k (car o))) )))
 
 (define miniml-In_channel.open_text open-input-file)
 (define (miniml-In_channel.input_all port)

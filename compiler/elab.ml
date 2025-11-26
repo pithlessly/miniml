@@ -306,8 +306,9 @@ let initial_ctx
       ()
     ));
     add_mod "Option" (mk_ctx (fun add _ _ _ _ ->
-      add "map" qab ((a --> b) --> (t_option a --> t_option b));
-      add "unwrap" qa (t_option a --> a);
+      add "map"    qab ((a --> b) --> (t_option a --> t_option b));
+      add "unwrap" qa  (t_option a --> a);
+      add "bind"   qab (t_option a --> ((a --> t_option b) --> t_option b));
       ()
     ));
     (
