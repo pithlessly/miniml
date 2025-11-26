@@ -281,8 +281,9 @@ let initial_ctx
       ()
     ));
     add_mod "Option" (mk_ctx (fun add _ _ _ _ ->
-      add "map" qab ((a --> b) --> (t_option a --> t_option b));
-      add "unwrap" qa (t_option a --> a);
+      add "map"    qab ((a --> b) --> (t_option a --> t_option b));
+      add "unwrap" qa  (t_option a --> a);
+      add "bind"   qab (t_option a --> ((a --> t_option b) --> t_option b));
       ()
     ));
     (
@@ -314,12 +315,14 @@ let initial_ctx
     add_mod "IntMap" (mk_ctx (fun add _ add_ty _ _ ->
       let ty1 name = let c = add_ty name 1 in fun a -> TCon (c, [a]) in
       let t = ty1 "t" in
-      add "empty"  qa  (t a);
-      add "lookup" qa  (t_int --> (t a --> t_option a));
-      add "insert" qa  (t_int --> (a --> (t a --> t a)));
-      add "fold"   qab ((a --> (t_int --> (b --> a))) --> (a --> (t b --> a)));
-      add "union"  qa  (t a --> (t a --> t a));
-      add "iter"   qa  ((t_int --> (a --> t_unit)) --> (t a --> t_unit));
+      add "empty"    qa  (t a);
+      add "is_empty" qa  (t a --> t_bool);
+      add "lookup"   qa  (t_int --> (t a --> t_option a));
+      add "insert"   qa  (t_int --> (a --> (t a --> t a)));
+      add "fold"     qab ((a --> (t_int --> (b --> a))) --> (a --> (t b --> a)));
+      add "union"    qa  (t a --> (t a --> t a));
+      add "iter"     qa  ((t_int --> (a --> t_unit)) --> (t a --> t_unit));
+      add "filter"   qa  ((t_int --> (a --> t_bool)) --> (t a --> t a));
       ()
     ));
     add_mod "Miniml" (mk_ctx (fun add _ _ _ _ ->
