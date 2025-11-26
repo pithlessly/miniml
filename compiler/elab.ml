@@ -266,6 +266,8 @@ let initial_ctx
       add "make"    [] (t_int --> (t_char --> t_string));
       add "for_all" [] ((t_char --> t_bool) --> (t_string --> t_bool));
       add "filter"  [] ((t_char --> t_bool) --> (t_string --> t_string));
+      add "<"       [] (t_string --> (t_string --> t_bool));
+      add ">"       [] (t_string --> (t_string --> t_bool));
       ()
     ));
     let t_void = ty0 "void" in

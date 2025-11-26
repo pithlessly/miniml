@@ -183,6 +183,9 @@
   (lambda (p) (lambda (s)
     (list->string (filter (string->list s) p)))))
 
+(define miniml-String.< (curry2 string<?))
+(define miniml-String.> (curry2 string>?))
+
 (define (miniml-Fun.id x) x)
 (define miniml-Fun.flip
   (lambda (f) (lambda (x) (lambda (y) ((f y) x)))))
