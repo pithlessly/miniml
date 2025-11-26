@@ -16,18 +16,20 @@ end = struct
   let (>)  : cf = fun a b -> a > b
 end
 
-let (<=) : int -> int -> bool = fun a b -> a <= b
-let (>=) : int -> int -> bool = fun a b -> a >= b
-let (<)  : int -> int -> bool = fun a b -> a < b
-let (>)  : int -> int -> bool = fun a b -> a > b
-
 module String = struct
   include String
   let filter p s =
     String.to_seq s
     |> Seq.filter p
     |> String.of_seq
+  let (<) (s1 : string) (s2 : string) = s1 < s2
+  let (>) (s1 : string) (s2 : string) = s1 > s2
 end
+
+let (<=) : int -> int -> bool = fun a b -> a <= b
+let (>=) : int -> int -> bool = fun a b -> a >= b
+let (<)  : int -> int -> bool = fun a b -> a < b
+let (>)  : int -> int -> bool = fun a b -> a > b
 
 module Option = struct
   let map = Option.map
