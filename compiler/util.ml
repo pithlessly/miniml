@@ -99,28 +99,26 @@ let counter () =
     i := 1 + v;
     v)
 
-let list_remove : ('a -> bool) -> 'a list -> ('a * 'a list) option =
-  fun p ->
-    let rec go acc =
-      function
-      | [] -> None
-      | h :: xs ->
-        if p h then
-          Some (h, Snoc.to_list_append acc xs)
-        else
-          go (Snoc (acc, h)) xs
-    in go Nil
+let list_remove (p : 'a -> bool) : 'a list -> ('a * 'a list) option =
+  let rec go acc =
+    function
+    | [] -> None
+    | h :: xs ->
+      if p h then
+        Some (h, Snoc.to_list_append acc xs)
+      else
+        go (Snoc (acc, h)) xs
+  in go Nil
 
 let list_split_at : int -> 'a list -> 'a list * 'a list =
-  fun n xs ->
-    let rec go n acc xs =
-      if n > 0 then
-        match xs with
-        | [] -> invalid_arg "list is too long to split"
-        | x :: xs -> go (n - 1) (Snoc (acc, x)) xs
-      else
-        (Snoc.to_list acc, xs)
-    in go n Nil xs
+  let rec go n acc xs =
+    if n > 0 then
+      match xs with
+      | [] -> invalid_arg "list is too long to split"
+      | x :: xs -> go (n - 1) (Snoc (acc, x)) xs
+    else
+      (Snoc.to_list acc, xs)
+  in fun n xs -> go n Nil xs
 
 let list_merge (cmp : 'a -> 'a -> int) : 'a list -> 'a list -> 'a list =
   let rec go xs ys =
@@ -136,11 +134,10 @@ let list_merge (cmp : 'a -> 'a -> int) : 'a list -> 'a list -> 'a list =
 
 let list_sort (cmp : 'a -> 'a -> int) : 'a list -> 'a list =
   let merge = list_merge cmp in
-  fun xs ->
-    let rec sort len xs =
-      if len <= 1 then xs else
-        let prefix_len = (len + 1) / 2 in
-        let suffix_len = len - prefix_len in
-        let (prefix, suffix) = list_split_at prefix_len xs in
-        merge (sort prefix_len prefix) (sort suffix_len suffix)
-    in sort (List.length xs) xs
+  let rec sort len xs =
+    if len <= 1 then xs else
+      let prefix_len = (len + 1) / 2 in
+      let suffix_len = len - prefix_len in
+      let (prefix, suffix) = list_split_at prefix_len xs in
+      merge (sort prefix_len prefix) (sort suffix_len suffix)
+  in fun xs -> sort (List.length xs) xs
