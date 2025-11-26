@@ -255,6 +255,9 @@
 (define (ht-key   entry) (vector-ref entry 1))
 (define (ht-value entry) (vector-ref entry 2))
 
+(define (hashtrie-empty? m)
+  (= 0 (car m)))
+
 (define (hashtrie-singleton hash k v)
   (cons 1 (vector hash k v)))
 
@@ -378,7 +381,7 @@
 (define (hashtrie-union key-eql? m1 m2)
   (define (collision-chain-union c1 c2)
     (append c1 (filter c2 (lambda (e2)
-      (not (any c1 (lambda (e1) (key-eql? (ht-key  e1) (ht-key  e2)))))))))
+      (not (any c1 (lambda (e1) (key-eql? (ht-key e1) (ht-key e2))))) ))))
   (define tree (let loop ((lvl 32)
                           (b1 (cdr m1))
                           (b2 (cdr m2)))
@@ -438,6 +441,21 @@
           ((vector? branch) ((p (ht-key m)) (ht-value m)))
           ((pair?   branch) (begin (loop (car branch))
                                    (loop (cdr branch)) )))))))
+
+(define hashtrie-filter (lambda (f) (lambda (m)
+  (define (collision-chain-filter c)
+    (filter c (lambda (e) ((f (ht-key e)) (ht-value e)))) )
+  (define tree (let loop ((lvl 32)
+                          (b (cdr m)))
+                 (cond ((zero? lvl) (collision-chain-filter b))
+                       ((null?   b) '())
+                       ((vector? b) (if ((f (ht-key b)) (ht-value b)) b '()))
+                       ((pair?   b) (let ((b1 (loop (- lvl 1) (car b)))
+                                          (b2 (loop (- lvl 1) (cdr b))))
+                                      (cond ((and (null? b1) (vector? b2)) b2)
+                                            ((and (vector? b1) (null? b2)) b1)
+                                            (else                          (cons b1 b2)) ))))))
+  (cons (hashtrie-branch-cardinality tree) tree) )))
 
 ; ====================================================
 ; StringMap primitives implemented using the hash trie
@@ -510,6 +528,7 @@
   h1)
 
 (define miniml-IntMap.empty hashtrie-empty)
+(define miniml-IntMap.is_empty hashtrie-empty?)
 (define miniml-IntMap.lookup (lambda (k) (lambda (m)
   (define entry (hashtrie-lookup = (int-hash k) k m))
   (if (null? entry) '() (list (ht-value entry))))))
@@ -518,3 +537,4 @@
   (if (null? new-map) m new-map)))))
 (define miniml-IntMap.fold hashtrie-fold)
 (define miniml-IntMap.iter hashtrie-iter)
+(define miniml-IntMap.filter hashtrie-filter)

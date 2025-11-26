@@ -71,21 +71,25 @@ end
 
 module IntMap : sig
   type 'a t
-  val empty  : 'a t
-  val lookup : int -> 'a t -> 'a option
-  val insert : int -> 'a -> 'a t -> 'a t
-  val fold   : ('a -> int -> 'b -> 'a) -> ('a -> 'b t -> 'a)
-  val union  : 'a t -> 'a t -> 'a t
-  val iter   : (int -> 'a -> unit) -> 'a t -> unit
+  val empty    : 'a t
+  val is_empty : 'a t -> bool
+  val lookup   : int -> 'a t -> 'a option
+  val insert   : int -> 'a -> 'a t -> 'a t
+  val fold     : ('a -> int -> 'b -> 'a) -> ('a -> 'b t -> 'a)
+  val union    : 'a t -> 'a t -> 'a t
+  val iter     : (int -> 'a -> unit) -> 'a t -> unit
+  val filter   : (int -> 'a -> bool) -> 'a t -> 'a t
 end = struct
   module Map = Map.Make(Int)
   type 'a t = 'a Map.t
   let empty = Map.empty
+  let is_empty = Map.is_empty
   let lookup = Map.find_opt
   let insert = Map.add
   let fold f x entries = Map.fold (fun k v acc -> f acc k v) entries x
   let union m1 m2 = Map.union (fun _ v1 _ -> Some v1) m1 m2
   let iter = Map.iter
+  let filter = Map.filter
 end
 
 module Miniml = struct
