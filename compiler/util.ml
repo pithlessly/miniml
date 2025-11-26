@@ -64,6 +64,14 @@ let fold_left_m
     | [] -> pure acc
     | x :: xs -> f acc x >>= fun y -> go y xs
   in go
+let for_m
+  ((pure  : unit -> 'unit_m),
+   ((>>=) : 'unit_m -> (unit -> 'unit_m) -> 'unit_m))
+  (f : 'a -> 'unit_m)
+  : 'a list -> 'unit_m =
+  let rec go = function | [] -> pure ()
+                        | x :: xs -> f x >>= fun () -> go xs
+  in go
 
 (* FIXME: this is not the best implementation in the world *)
 let map2_m
@@ -141,3 +149,20 @@ let list_sort (cmp : 'a -> 'a -> int) : 'a list -> 'a list =
       let (prefix, suffix) = list_split_at prefix_len xs in
       merge (sort prefix_len prefix) (sort suffix_len suffix)
   in fun xs -> sort (List.length xs) xs
+
+let list_equal (eql : 'a -> 'a -> bool) : 'a list -> 'a list -> bool =
+  let rec go l1 l2 =
+    match (l1, l2) with
+    | ([],       [])       -> true
+    | (a1 :: l1, a2 :: l2) -> if eql a1 a2 then go l1 l2 else false
+    | _                    -> false
+  in go
+
+let try_zip : 'a list -> 'b list -> (('a * 'b) snoc, int * int) result =
+  let rec go n acc l1 l2 =
+    match (l1, l2) with
+    | ([],       [])       -> Ok acc
+    | (a1 :: l1, a2 :: l2) -> go (n + 1) (Snoc (acc, (a1, a2))) l1 l2
+    | ([],       _)        -> Error (n, n + List.length l2)
+    | (_,        [])       -> Error (n + List.length l1, n)
+  in fun l1 l2 -> go 0 Nil l1 l2
