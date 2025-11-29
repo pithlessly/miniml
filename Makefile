@@ -20,6 +20,7 @@ COMPILER_SOURCES := \
 	compiler/token.ml          \
 	compiler/common_syntax.ml  \
 	compiler/ast.ml            \
+	compiler/initial_ctx.ml    \
 	compiler/core.ml           \
 	compiler/lex.ml            \
 	compiler/parser.ml         \
