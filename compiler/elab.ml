@@ -104,16 +104,7 @@ and unify_all : typ list -> typ list -> unit m_result = fun ts1 ts2 ->
   | (t1 :: ts1, t2 :: ts2) -> let* () = unify t1 t2 in unify_all ts1 ts2
   | _ -> Error (E "cannot unify different numbers of arguments")
 
-type initial_ctx_types = {
-  t_func   : typ -> typ -> typ;
-  t_tuple  : typ list -> typ;
-  t_unit   : typ;
-  t_char   : typ;
-  t_int    : typ;
-  t_string : typ;
-  t_bool   : typ;
-  t_list   : typ -> typ;
-}
+type initial_ctx_types = typ Initial_ctx.pervasive_types
 
 type initial_ctx = {
   top_level : Ctx.t;
@@ -125,24 +116,19 @@ let initial_ctx
   (new_qvar    : string -> unit -> qvar)
   (next_con_id : unit -> con_id)
 : initial_ctx =
-  (* it's okay to reuse qvars for multiple variables here -
-     they have the same ID, but this is only used to distinguish
-     them during instantiation *)
-  let a = new_qvar "a" () in
-  let qa  = [a] and a = QVar a in
-  let b = new_qvar "b" () in
-  let qab = b :: qa and b = QVar b in
-  let c = new_qvar "c" () in
-  let qabc = c :: qab and c = QVar c in
-  let rec mk_ctx callback prefix =
-    let ctx = ref Ctx.empty_layer in
+  let unwrap_qvar = function
+    | QVar qv -> qv
+    | _       -> invalid_arg "impossible: element of list should be a QVar"
+  in
+  let rec new_module_builder (layer : Ctx.layer ref) (prefix : string) ()
+      : (typ, typ) Initial_ctx.module_builder =
     let provenance = Builtin prefix in
     let add name type_params ty =
-      ctx := Ctx.layer_extend (deref ctx)
-               { name; id = next_var_id (); provenance;
-                 type_params; ty }
-    in
-    let add_con name type_params param_tys adt_ty =
+      let type_params = List.map unwrap_qvar type_params in
+      layer := Ctx.layer_extend (deref layer)
+        { name; id = next_var_id (); provenance; type_params; ty }
+    and add_con name type_params param_tys adt_ty =
+      let type_params = List.map unwrap_qvar type_params in
       let cvar : cvar = { name; id = next_var_id (); provenance;
                           type_params; param_tys; adt_ty } in
       (match adt_ty with
@@ -151,199 +137,52 @@ let initial_ctx
         | Datatype cvars -> cvars := cvar :: deref cvars
         | _ -> invalid_arg "impossible: can't add a constructor")
       | _ -> invalid_arg "impossible: can't add a constructor");
-      ctx := Ctx.layer_extend_con (deref ctx) cvar
-    in
-    let add_ty name arity =
+      layer := Ctx.layer_extend_con (deref layer) cvar
+    and add_ty name arity =
       let con : con = { name; id = next_con_id (); arity; info = Datatype (ref []) } in
-      (ctx := Ctx.layer_extend_ty (deref ctx) (Nominal con); con)
+      layer := Ctx.layer_extend_ty (deref layer) (Nominal con);
+      con
+    and add_alias name def =
+      layer := Ctx.layer_extend_ty (deref layer) (Alias ({
+        name;
+        id = next_con_id ();
+        arity = 0; (* the stdlib only needs nullary aliases *)
+        info = Alias
+      }, [], def));
+      def
+    and add_mod name callback =
+      let sub_layer = ref Ctx.empty_layer in
+      callback (new_module_builder sub_layer (prefix ^ name ^ ".") ());
+      layer := Ctx.layer_extend_mod (deref layer) { name; layer = deref sub_layer }
     in
-    let add_alias name def =
-      let arity = 0 in (* the stdlib only needs nullary aliases *)
-      let con : con = { name; id = next_con_id (); arity; info = Alias } in
-      (ctx := Ctx.layer_extend_ty (deref ctx) (Alias (con, [], def)); def)
-    in
-    let add_mod name m =
-      ctx := Ctx.layer_extend_mod (deref ctx) { name; layer = m (prefix ^ name ^ ".") }
-    in
-    (callback add add_con add_ty add_alias add_mod; deref ctx)
-  in
-  let types : initial_ctx_types option ref = ref None in
-  let top_level callback =
-    let top = mk_ctx callback (* prefix: *) "" in
-    { top_level = { top; parent = None };
-      types = Option.unwrap (deref types) }
-  in
-  top_level (fun add add_con add_ty add_alias add_mod ->
     let ty0 name = TCon (add_ty name 0, [])
     and ty1 name = let c = add_ty name 1 in fun a -> TCon (c, [a])
     and ty2 name = let c = add_ty name 2 in fun a b -> TCon (c, [a; b])
+    and tyN name = (* TODO: using -1 for a variadic type constructor is janky *)
+                   let c = add_ty name (0 - 1) in
+                   fun ts -> TCon (c, ts)
     in
-    let t_tuple_con = add_ty "*" (0 - 1) (* TODO: this feels janky? *) in
-    let t_tuple ts = TCon (t_tuple_con, ts) in
-    let (-->) = ty2 "->"
-    and t_unit = add_alias "unit" (t_tuple [])
-    and t_char = ty0 "char"
-    and t_int = ty0 "int"
-    and t_string = ty0 "string"
-    and t_bool = ty0 "bool"
-    in
-    add "|>"  qab (a --> ((a --> b) --> b));
-    add "&&"  [] (t_bool --> (t_bool --> t_bool));
-    add "||"  [] (t_bool --> (t_bool --> t_bool));
-    add "not" [] (t_bool --> t_bool);
-    add "+"   [] (t_int --> (t_int --> t_int));
-    add "-"   [] (t_int --> (t_int --> t_int));
-    add "*"   [] (t_int --> (t_int --> t_int));
-    add "/"   [] (t_int --> (t_int --> t_int));
-    add ">="  [] (t_int --> (t_int --> t_bool));
-    add "<="  [] (t_int --> (t_int --> t_bool));
-    add ">"   [] (t_int --> (t_int --> t_bool));
-    add "<"   [] (t_int --> (t_int --> t_bool));
-    (* TODO: figure out a better alternative to polymorphic physical equality *)
-    add "="   qa (a --> (a --> t_bool));
-    add "<>"  qa (a --> (a --> t_bool));
-    add "=="  qa (a --> (a --> t_bool));
-    add "^"   [] (t_string --> (t_string --> t_string));
-    add ";"   qa (t_unit --> (a --> a));
-    add "min" [] (t_int --> (t_int --> t_int));
-    add "fst" qab (t_tuple [a; b] --> a);
-    add "snd" qab (t_tuple [a; b] --> b);
-    add "int_of_string" [] (t_string --> t_int);
-    add "string_of_int" [] (t_int --> t_string);
-    add "int_of_char"   [] (t_char --> t_int);
-    add "char_of_int"   [] (t_int --> t_char);
-    add "print_endline" [] (t_string --> t_unit);
-    add "prerr_endline" [] (t_string --> t_unit);
-    add "invalid_arg" qa (t_string --> a);
-    add "exit"        qa (t_int --> a);
-    add_con "true"  [] [] t_bool;
-    add_con "false" [] [] t_bool;
-    (
-      let t_ref = ty1 "ref" in
-      add "ref"   qa (a --> t_ref a);
-      add "deref" qa (t_ref a --> a);
-      add ":="    qa (t_ref a --> (a --> t_unit))
-    );
-    let t_list = ty1 "list" in
-    add_con "::" qa [a; t_list a] (t_list a);
-    add     "::" qa (a --> (t_list a --> t_list a));
-    add     "@"  qa (t_list a --> (t_list a --> t_list a));
-    let t_option = ty1 "option" in
-    add_con "None" qa [] (t_option a);
-    add_con "Some" qa [a] (t_option a);
-    let t_result = ty2 "result" in
-    add_con "Ok"    qab [a] (t_result a b);
-    add_con "Error" qab [b] (t_result a b);
-    add_mod "List" (mk_ctx (fun add _ _ _ _ ->
-      add "init"       qa   (t_int --> ((t_int --> a) --> t_list a));
-      add "rev"        qa   (t_list a --> t_list a);
-      add "fold_left"  qab  ((a --> (b --> a)) --> (a --> (t_list b --> a)));
-      add "fold_right" qab  ((b --> (a --> a)) --> (t_list b --> (a --> a)));
-      add "map"        qab  ((a --> b) --> (t_list a --> t_list b));
-      add "map2"       qabc ((a --> (b --> c)) --> (t_list a --> (t_list b --> t_list c)));
-      add "mapi"       qab  ((t_int --> (a --> b)) --> (t_list a --> t_list b));
-      add "for_all"    qa   ((a --> t_bool) --> (t_list a --> t_bool));
-      add "filter"     qa   ((a --> t_bool) --> (t_list a --> t_list a));
-      add "find_opt"   qa   ((a --> t_bool) --> (t_list a --> t_option a));
-      add "iter"       qa   ((a --> t_unit) --> (t_list a --> t_unit));
-      add "length"     qa   (t_list a --> t_int);
-      add "concat"     qa   (t_list (t_list a) --> t_list a);
-      add "concat_map" qab  ((a --> t_list b) --> (t_list a --> t_list b));
-      ()
-    ));
-    add_mod "Char" (mk_ctx (fun add _ _ _ _ ->
-      add ">=" [] (t_char --> (t_char --> t_bool));
-      add "<=" [] (t_char --> (t_char --> t_bool));
-      add ">"  [] (t_char --> (t_char --> t_bool));
-      add "<"  [] (t_char --> (t_char --> t_bool));
-      ()
-    ));
-    add_mod "String" (mk_ctx (fun add _ _ _ _ ->
-      add "length"  [] (t_string --> t_int);
-      add "get"     [] (t_string --> (t_int --> t_char));
-      add "sub"     [] (t_string --> (t_int --> (t_int --> t_string)));
-      add "concat"  [] (t_string --> (t_list t_string --> t_string));
-      add "make"    [] (t_int --> (t_char --> t_string));
-      add "for_all" [] ((t_char --> t_bool) --> (t_string --> t_bool));
-      add "filter"  [] ((t_char --> t_bool) --> (t_string --> t_string));
-      add "<"       [] (t_string --> (t_string --> t_bool));
-      add ">"       [] (t_string --> (t_string --> t_bool));
-      ()
-    ));
-    let t_void = ty0 "void" in
-    add_mod "Void" (mk_ctx (fun add _ _ _ _ ->
-      add "absurd" qa (t_void --> a);
-      ()
-    ));
-    add_mod "Fun" (mk_ctx (fun add _ _ _ _ ->
-      add "id"   qa   (a --> a);
-      add "flip" qabc ((a --> (b --> c)) --> (b --> (a --> c)));
-      ()
-    ));
-    add_mod "Option" (mk_ctx (fun add _ _ _ _ ->
-      add "map"    qab ((a --> b) --> (t_option a --> t_option b));
-      add "unwrap" qa  (t_option a --> a);
-      add "bind"   qab (t_option a --> ((a --> t_option b) --> t_option b));
-      ()
-    ));
-    (
-      let t_in_channel = ty0 "in_channel" in
-      add_mod "In_channel" (mk_ctx (fun add _ _ _ _ ->
-        add "open_text" [] (t_string --> t_in_channel);
-        add "input_all" [] (t_in_channel --> t_string);
-        add "close"     [] (t_in_channel --> t_unit);
-        ()
-      ))
-    );
-    add_mod "StringMap" (mk_ctx (fun add add_con add_ty _ _ ->
-      let ty0 name = TCon (add_ty name 0, [])
-      and ty1 name = let c = add_ty name 1 in fun a -> TCon (c, [a])
-      in
-      let t = ty1 "t" in
-      add "empty"     qa  (t a);
-      add "singleton" qa  (t_string --> (a --> t a));
-      add "lookup"    qa  (t_string --> (t a --> t_option a));
-      add "eql"       qa  ((a --> (a --> t_bool)) --> (t a --> (t a --> t_bool)));
-      add "insert"    qa  (t_string --> (a --> (t a --> t_option (t a))));
-      add "map"       qab ((t_string --> (a --> b)) --> (t a --> t b));
-      add "fold"      qab ((a --> (t_string --> (b --> a))) --> (a --> (t b --> a)));
-      let t_dup_err = ty0 "dup_err" in
-      add_con "DupErr" [] [t_string] t_dup_err;
-      add "disjoint_union" qa (t a --> (t a --> t_result (t a) (t_dup_err)));
-      ()
-    ));
-    add_mod "IntMap" (mk_ctx (fun add _ add_ty _ _ ->
-      let ty1 name = let c = add_ty name 1 in fun a -> TCon (c, [a]) in
-      let t = ty1 "t" in
-      add "empty"    qa  (t a);
-      add "is_empty" qa  (t a --> t_bool);
-      add "lookup"   qa  (t_int --> (t a --> t_option a));
-      add "insert"   qa  (t_int --> (a --> (t a --> t a)));
-      add "fold"     qab ((a --> (t_int --> (b --> a))) --> (a --> (t b --> a)));
-      add "union"    qa  (t a --> (t a --> t a));
-      add "iter"     qa  ((t_int --> (a --> t_unit)) --> (t a --> t_unit));
-      add "filter"   qa  ((t_int --> (a --> t_bool)) --> (t a --> t a));
-      ()
-    ));
-    add_mod "Miniml" (mk_ctx (fun add _ _ _ _ ->
-      add "log_level" [] t_int;
-      add "debug" [] ((t_unit --> t_string) --> t_unit);
-      add "trace" [] ((t_unit --> t_string) --> t_unit);
-      add "argv" [] (t_unit --> t_list t_string);
-      ()
-    ));
-    types := Some {
-      t_func = (-->);
-      t_tuple;
-      t_unit;
-      t_char;
-      t_int;
-      t_string;
-      t_bool;
-      t_list;
-    };
-    ()
-  )
+    { add; add_con; ty0; ty1; ty2; tyN; add_alias; add_mod }
+  in
+  let ctx = ref Ctx.empty_layer in
+  let builder = new_module_builder ctx (* prefix: *) "" () in
+  let t_tuple = builder.tyN "*" in
+  let t_unit = builder.add_alias "unit" (t_tuple []) in
+  let pervasive_types : initial_ctx_types = {
+    t_func   = builder.ty2 "->";
+    t_tuple; t_unit;
+    t_char   = builder.ty0 "char";
+    t_int    = builder.ty0 "int";
+    t_string = builder.ty0 "string";
+    t_bool   = builder.ty0 "bool";
+    t_list   = builder.ty1 "list";
+  } in
+  Initial_ctx.initial_ctx {
+    types = pervasive_types;
+    new_qvar = (fun name () -> QVar (new_qvar name ()));
+    top_level = builder;
+  };
+  { top_level = { top = deref ctx; parent = None; }; types = pervasive_types }
 
 let preprocess_constructor_args
   (instantiate : qvar list -> unit -> typ -> typ)
@@ -463,6 +302,7 @@ let new_elaborator () : elaborator =
   let new_qvar name () : qvar = { name; id = next_var_id () } in
   let initial_ctx = initial_ctx next_var_id new_qvar next_con_id in
   let { t_func = (-->); t_tuple; t_char; t_int; t_string; t_bool; t_list; _ }
+      : initial_ctx_types
       = initial_ctx.types
   in
   let new_uvar lvl name () : typ =
