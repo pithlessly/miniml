@@ -231,8 +231,8 @@ let preprocess_constructor_args
     | (1, Some args)   -> Ok [mk_tuple args]
     | (_, Some args)   -> if num_params = List.length args
                           then Ok args
-                          else Error (E ("constructor " ^ name
-                                         ^ " is applied to the wrong number of arguments"))
+                          else Error (err_sp ("constructor " ^ name
+                                              ^ " is applied to the wrong number of arguments") sp)
   in
   Ok (cv, param_tys, args)
 
