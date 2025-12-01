@@ -494,28 +494,21 @@ let new_elaborator () : elaborator =
     in
     add_adts ctx >>= add_aliases >>= add_terms
   in
-  let generalize (lvl : level) : typ list -> qvar list * typ list =
-    (* TODO: we don't need to return a new type list here *)
-    let rec go ty qvars =
-      match ty with
-      | QVar qv -> (qvars, ty)
-      | TCon (c, tys) ->
-        let (qvars, tys) = go_list tys qvars in
-        (qvars, (TCon (c, tys)))
+  let generalize_in_place (lvl : level) : typ list -> qvar list =
+    let rec go qvars = function
+      | QVar qv -> qvars
+      | TCon (_, tys) -> List.fold_left go qvars tys
       | UVar r ->
         match deref r with
-        | Known ty -> go ty qvars
+        | Known ty -> go qvars ty
         | Unknown (name, id, lvl') ->
           if lvl' > lvl then
             let qv = new_qvar name () in
-            let qvars = qv :: qvars in
             r := Known (QVar qv);
-            (qvars, QVar qv)
+            qv :: qvars
           else
-            (qvars, ty)
-    and go_list tys qvars =
-      map_m state_monad go tys qvars
-    in fun tys -> go_list tys []
+            qvars
+    in List.fold_left go []
   in
   let instantiate lvl (qvars : qvar list) () : typ -> typ =
     let qvars = List.map (fun (qv : qvar) -> (qv, new_uvar lvl (Some qv.name) ())) qvars in
@@ -892,7 +885,7 @@ let new_elaborator () : elaborator =
         bound_vars
       ) else
         let types = List.map (fun (v : var) -> v.ty) bound_vars in
-        let (qvars, types) = generalize lvl types in
+        let qvars = generalize_in_place lvl types in
         Miniml.trace (fun () ->
           "defined(gen): " ^ (
             bound_vars
