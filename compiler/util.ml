@@ -41,6 +41,9 @@ module Snoc = struct
   let to_list (xs : 'a snoc) : 'a list =
     to_list_append xs []
 
+  let from_list (xs : 'a list) : 'a snoc =
+    List.fold_left (fun acc x -> Snoc (acc, x)) Nil xs
+
   let length : 'a snoc -> int =
     fun xs -> fold_right (fun _ n -> n + 1) xs 0
 end
