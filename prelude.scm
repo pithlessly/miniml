@@ -59,7 +59,6 @@
 (define (miniml-ref x)   (vector 'ref x))
 (define (miniml-deref r) (vector-ref r 1))
 (define  miniml-:=       (lambda (r) (lambda (x) (vector-set! r 1 x))))
-(define miniml-cons      (curry2 cons))
 (define miniml-@         (curry2 append))
 (define miniml-List.init
   (lambda (n) (lambda (f)

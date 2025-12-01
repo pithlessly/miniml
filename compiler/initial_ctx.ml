@@ -87,8 +87,6 @@ let initial_ctx {
     add ":="    (ref a @-> a @-> unit)
     );
   add_con "::" [a; list a] (list a);
-  (* TODO: remove this; have AST treat (::) in expr as a constructor *)
-  add     "::" (a @-> list a @-> list a);
   add     "@"  (list a @-> list a @-> list a);
   let option = ty1 "option" in
   add_con "None" []  (option a);
