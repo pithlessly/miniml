@@ -559,7 +559,9 @@ and expr2 = fun input k ->
     let operands = first_operand :: List.map snd operands in
     let result = resolve_precedence operands operators
       (fun (s, sp) ->
-        let operator_function l r = App (App (Var (s, sp), l), r) in
+        let operator_function l r = App (App (Var (s, sp), l), r)
+        and constructor_function l r = Con ((s, sp), Some [l; r])
+        in
         match String.get s 0 with
         | ',' -> (1, AssocNone (fun es -> Tuple es))
         | '|' -> if s = "||" then
@@ -571,7 +573,10 @@ and expr2 = fun input k ->
               -> (4, AssocLeft operator_function)
         | '@' | '^'
               -> (5, AssocRight operator_function)
-        | ':' -> (6, AssocRight operator_function)
+        | ':' -> if s = "::" then
+                   (6, AssocRight constructor_function)
+                 else
+                   (6, AssocRight operator_function)
         | '+' | '-'
               -> (7, AssocLeft operator_function)
         | '*' | '/'

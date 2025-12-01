@@ -49,7 +49,6 @@ let go_var ({ name; id; provenance; _ } : var) =
     | "|>" -> "miniml-ap"
     | "||" -> "miniml-or"
     | ";"  -> "miniml-semicolon"
-    | "::" -> "miniml-cons"
     | _    -> "miniml-" ^ prefix ^ name
 
 let go_cvar ({ provenance; name; id; _ } : cvar) =
@@ -167,6 +166,8 @@ let scheme (_ : Elab.elaborator) (decls : core) =
         match (cv.name, es) with
         | ("true",  [])  -> (true, "#t")
         | ("false", [])  -> (true, "#f")
+        | ("::", [e1; e2])
+                         -> (true, "(cons " ^ go_expr_pure e1 ^ " " ^ go_expr_pure e2 ^ ")")
         | ("None",  [])  -> (true, "'()")
         | ("Some",  [e]) -> (true, "(list " ^ go_expr_pure e ^ ")")
         (* TODO: DupErr could use newtype layout *)
