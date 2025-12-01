@@ -116,19 +116,26 @@ let initial_ctx
   (new_qvar    : string -> unit -> qvar)
   (next_con_id : unit -> con_id)
 : initial_ctx =
-  let unwrap_qvar = function
-    | QVar qv -> qv
-    | _       -> invalid_arg "impossible: element of list should be a QVar"
+  let free_qvars : typ list -> qvar list =
+    let rec go (qvars : qvar IntMap.t) = function
+      | QVar qv       -> IntMap.insert qv.id qv qvars
+      | TCon (_, tys) -> List.fold_left go qvars tys
+      | UVar u        -> match deref u with
+                         | Known ty -> go qvars ty
+                         | _ -> invalid_arg "should be impossible to find an unsolved UVar here"
+    in
+    fun tys -> List.fold_left go IntMap.empty tys
+               |> IntMap.fold (fun acc _ qv -> qv :: acc) []
   in
   let rec new_module_builder (layer : Ctx.layer ref) (prefix : string) ()
       : (typ, typ) Initial_ctx.module_builder =
     let provenance = Builtin prefix in
-    let add name type_params ty =
-      let type_params = List.map unwrap_qvar type_params in
+    let add name ty =
+      let type_params = free_qvars [ty] in
       layer := Ctx.layer_extend (deref layer)
         { name; id = next_var_id (); provenance; type_params; ty }
-    and add_con name type_params param_tys adt_ty =
-      let type_params = List.map unwrap_qvar type_params in
+    and add_con name param_tys adt_ty =
+      let type_params = free_qvars (adt_ty :: param_tys) in
       let cvar : cvar = { name; id = next_var_id (); provenance;
                           type_params; param_tys; adt_ty } in
       (match adt_ty with
