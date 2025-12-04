@@ -46,6 +46,10 @@ module Snoc = struct
 
   let length : 'a snoc -> int =
     fun xs -> fold_right (fun _ n -> n + 1) xs 0
+
+  let append : 'a snoc -> 'a snoc -> 'a snoc =
+    fun xs ys ->
+      fold_left (fun acc y -> Snoc (acc, y)) xs ys
 end
 
 (* monadic operations *)
