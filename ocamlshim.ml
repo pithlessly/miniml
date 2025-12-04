@@ -75,6 +75,7 @@ module IntMap : sig
   val is_empty : 'a t -> bool
   val lookup   : int -> 'a t -> 'a option
   val insert   : int -> 'a -> 'a t -> 'a t
+  val map      : (int -> 'a -> 'b) -> 'a t -> 'b t
   val fold     : ('a -> int -> 'b -> 'a) -> ('a -> 'b t -> 'a)
   val union    : 'a t -> 'a t -> 'a t
   val iter     : (int -> 'a -> unit) -> 'a t -> unit
@@ -86,6 +87,7 @@ end = struct
   let is_empty = Map.is_empty
   let lookup = Map.find_opt
   let insert = Map.add
+  let map = Map.mapi
   let fold f x entries = Map.fold (fun k v acc -> f acc k v) entries x
   let union m1 m2 = Map.union (fun _ v1 _ -> Some v1) m1 m2
   let iter = Map.iter

@@ -534,6 +534,7 @@
 (define miniml-IntMap.insert (lambda (k) (lambda (v) (lambda (m)
   (define new-map (hashtrie-insert = (int-hash k) k v m))
   (if (null? new-map) m new-map)))))
+(define miniml-IntMap.map  hashtrie-map)
 (define miniml-IntMap.fold hashtrie-fold)
 (define miniml-IntMap.iter hashtrie-iter)
 (define miniml-IntMap.filter hashtrie-filter)

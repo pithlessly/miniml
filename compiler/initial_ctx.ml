@@ -85,7 +85,7 @@ let initial_ctx {
     add "ref"   (a @-> ref a);
     add "deref" (ref a @-> a);
     add ":="    (ref a @-> a @-> unit)
-    );
+  );
   add_con "::" [a; list a] (list a);
   add     "@"  (list a @-> list a @-> list a);
   let option = ty1 "option" in
@@ -175,6 +175,7 @@ let initial_ctx {
     add "is_empty" (t a @-> bool);
     add "lookup"   (int @-> t a @-> option a);
     add "insert"   (int @-> a @-> t a @-> t a);
+    add "map"      ((int @-> a @-> b) @-> (t a @-> t b));
     add "fold"     ((a @-> int @-> b @-> a) @-> (a @-> t b @-> a));
     add "union"    (t a @-> (t a @-> t a));
     add "iter"     ((int @-> a @-> unit) @-> t a @-> unit);
