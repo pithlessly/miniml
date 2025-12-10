@@ -52,13 +52,7 @@ let go_var ({ name; id; provenance; _ } : var) =
     | "::" -> "miniml-cons"
     | _    -> "miniml-" ^ prefix ^ name
 
-let go_cvar ({ provenance; name; id; _ } : cvar) =
-  match (provenance, name) with
-  (* TODO: avoid special casing these constructors *)
-  | (Builtin "StringMap.", "DupErr")
-  | (Builtin "", ("Error" | "Ok")) -> "'" ^ name
-  | (User, _) -> "'" ^ name ^ string_of_int id
-  | _ -> invalid_arg "builtin constructors are handled specially"
+let go_cvar (cv : cvar) = "'" ^ cv.name
 
 let scheme (_ : Elab.elaborator) (decls : core) =
   let result = ref Nil in
